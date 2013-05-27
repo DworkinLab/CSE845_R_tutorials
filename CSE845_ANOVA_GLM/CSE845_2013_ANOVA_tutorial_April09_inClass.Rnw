@@ -1,0 +1,222 @@
+\documentclass[a4paper]{article}
+\title{CSE845 Tutorial on ANOVA as a general linear model} 
+\author{Ian Dworkin}
+\begin{document} 
+\maketitle
+\date
+
+<<echo=F>>=
+# changes some default display options
+options(show.signif.stars=F)
+options(digits=3)
+@
+
+\section*{Introduction, reading in \& subsetting the data}
+Now we get to look at the practical side of the final piece (well almost) of the puzzle for general linear models. That is, how to integrate categorical variables into the model. We will first start by just using the categorical predictors for the dataset generated using Avida examining the consequences of recombination (\texttt{Sex}) and the presence or absence of parasites (\texttt{Parasites}). We will continue to work with a dataset that looks at phenotypic diversity (number of tasks performed) as a function of a number of predictor variables, including the presence \& absence of parasites, recombination and varying mutation rate. This data represents the endpoints of Avida runs (100,000 updates).
+
+ Our response variable remains \texttt{FinalDiversityIndex}. Since we know from our previous examination of the data that \texttt{HostMutationRate} has only a minor influence on diversity, we will not worry about it for the moment (i.e. we will not subset the data to only examine one particular mutation rate).\newline
+
+We will make use of the \texttt{car} library again so let's load it:
+<<>>=
+require(car)
+@
+
+We read in the data
+
+<<>>=
+parasite.data <- read.csv('http://beaconcourse.pbworks.com/f/sexAsex.csv', h=T)
+@
+
+And take another look at it.
+<<>>=
+str(parasite.data)
+summary(parasite.data)
+@
+
+Our two categorical variables are \texttt{Sex} and \texttt{Parasites} although they are currently coded in dummy or indicator variable format (i.e as 0 or 1). We can also see that \textbf{R} is treating these as integers not as \textit{factors}, which is the standard format for categorical variables (which are not surprisingly often called factors). While it would be convenient to leave these in a 0 \& 1 coding, I want to demonstrate more generally how we deal with factors, so we will convert these to factors.
+
+<<>>=
+parasite.data$Sex <- factor(parasite.data$Sex, 
+  levels=c(0,1), labels=c("NoSex", "Sex"))
+
+str(parasite.data$Sex)  
+@
+
+The \texttt{levels} argument (which is optional) just tells us what the levels that our variable may take, while the \texttt{labels} argument provides names. I don't want to run this in the tutorial, but type \texttt{parasite.data\$Sex}, and you will get a vector with \texttt{Sex} and \texttt{NoSex} instead of 0 and 1s. \textbf{R} will be using a coding underneath it all using the indicator variables (0 \& 1).
+
+<<>>=
+head(parasite.data$Sex) # First six observations
+
+tail(parasite.data$Sex) # Final six observations
+@
+
+Now we do the same for \texttt{Parasites}:
+<<>>=
+parasite.data$Parasites <- factor(parasite.data$Parasites, 
+  levels=c(0,1), labels=c("NoParasites", "Parasites"))  
+@
+
+\section*{Visual examination of the relationship between variables}
+We want to ask about the relationship between final (phenotypic) diversity (\texttt{FinalDiversityIndex}) and Sex (\texttt{Sex}) and \texttt{Parasites}.
+
+We will start with some basic boxplots:
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+
+par(mfrow=c(2,1))
+plot(FinalDiversityIndex ~ Sex, 
+  data=parasite.data, 
+  main="Relationship between diversity and recombination" )
+
+plot(FinalDiversityIndex ~ Parasites, 
+  data=parasite.data, 
+  main="Relationship between diversity and Presence of Parasites" )
+  
+@
+\end{center}
+
+This gives us some idea of what might be going on. However it is difficult to quantitatively gauge from boxplots what is happening (since it is plotting observed variation in the response by the different levels of the the factors. It is also hard to tell if there may be some form of interaction between these two different factors (which we will get at later.)
+
+
+\section*{The Analysis of Variance (ANOVA) as a general linear model}
+
+Now we want to actually model the influence of \texttt{Parasites} (our `predictor') on \texttt{FinalDiversityIndex} (our `response'). In statistical jargon we say that we are regressing \texttt{FinalDiversityIndex} onto \texttt{Parasites} (regressing our `y' onto our `x').  
+
+To perform this we again use the \texttt{lm()} function in \textbf{R}. lm stands for \textbf{L}inear \textbf{M}odel. As we have learned linear regression is just a special case of the \emph{general linear model} in statistics. Similarly, the ANOVA is just another special case of the general linear model, with dummy variable encodings. 
+
+In \textbf{R} we regress y onto x like:
+
+\texttt{lm(y $\sim$ x, data=YourData)}, where the tilde (`$\sim$') means `is modeled as'. So you would read this as ``y is modeled as a function of x''. 
+
+Using the \texttt{lm()} in  \textbf{R} assumes that you want to fit an intercept term in your model. For a categorical variable, this means we are going to be using a ``treatment contrast'' design matrix. This means that the 'intercept' will be the mean for the first factor level of our treatment \texttt{NoParasites}. The ``slope'' represents the deviation between the means of the two groups (\texttt{NoParasites} VS. \texttt{Parasites}). This is a useful representation (as we will see) as it allows us to directly examine this deviation and assess its magnitude, uncertainty in its estimate, and significance.
+
+ 
+Now we actually fit the model in \textbf{R}
+
+<<>>=
+model_1 <- lm(FinalDiversityIndex ~ Parasites, 
+  data=parasite.data)
+
+summary(model_1)
+confint(model_1)
+@
+
+What does this tell us? First that the mean for \texttt{FinalDiversityIndex} for those samples from the\texttt{NoParasites} treatment is 1.72 with standard error of 0.054 and 95\% Confidence Intervals from 1.62-1.83.  Let's check this.
+
+<<>>=
+div_ParN_mean <- mean(parasite.data$FinalDiversityIndex[parasite.data$Parasites=="NoParasites"])
+div_ParN_mean
+coef(model_1)[1] #Compare this to divParN_mean
+@
+ 
+ More importantly we can address the important question of ``How does adding parasites influence the final diversity in the population?'' Here we see that the coefficient \texttt{ParasitesParasites} is what we need to look at. First let me explain the weird name. The first ``Parasites'' is telling us the name of the predictor variable we are using. The second ``Parasites'' is telling us that this is looking at the one of the levels of this predictor variable (of which there are two; \texttt{NoParasites}, which is the base level, and the second which is \texttt{Parasites}).
+ 
+The coefficient of $\sim$ 1.47 with 95\% CI 1.32-1.62 tells us that the presence of Parasites in the populations increasing final diversity by an average amount of 1.47 tasks. Importantly the 95\% Confidence Intervals do not overlap with 0 suggesting that we have a pretty decent degree of certainty that this effect is ``real''. Before we spend any time thinking about how ``large'' and effect it has, it will be helpful to think a bit more about the meaning of the parameter estimate. 
+
+The intercept from the model, as we saw represented the mean for the ``base'' level for the factor, which was \texttt{NoParasites}, with a mean of $1.72$. How does the co-efficient of $1.47$ for Parasites relate? The mean value for \texttt{FinalDiversityIndex} for the subset of data with parasites present is:
+
+<<>>=
+div_ParY_mean <- mean(parasite.data$FinalDiversityIndex[parasite.data$Parasites=="Parasites"])
+div_ParY_mean
+@
+ 
+Given that the parameter estimate associated with Parasites being present represents the increase in diversity \emph{over and above} the mean value with parasites being absent, we would expect that adding the intercept and the ``slope'' parameters together should be equal to the mean for diversity when parasites are present
+
+<<>>=
+coef(model_1)[1] + coef(model_1)[2] 
+  # adding the two parameters together
+
+sum(coef(model_1)) # An easier way of coding it  
+@
+
+Which is equal to the mean for \texttt{FinalDiversityIndex} when \texttt{Parasites} are present. Another way of thinking about this is that the parameter estimate associated with parasites being present \texttt{ParasitesParasites} is the difference between the means for diversity for each of the two treatment levels.
+
+<<>>=
+div_ParY_mean - div_ParN_mean # difference in means
+coef(model_1)[2]  # same as the co-efficient
+@
+
+We should also take a minute and look at the \emph{design matrix} for this model. If you remember the design matrix is the matrix that contains dummy (sometimes called indicator) variables as well as numerical explanatory (sometimes called predictor or covariates) variables. There will be one row for each observation in the data set and the columns will depend on the number of predictor variables. When the predictors are quantitative there will be one column for each predictor, but for categorical predictors (factors) it will depend on how many unique levels there will be for each factor (1 - number of levels). The function in \textbf{R} to look at this is called \texttt{model.matrix}.
+
+<<>>=
+head(model.matrix(model_1)) # First 6 rows of the design matrix
+tail(model.matrix(model_1)) # Last 6 rows of the design matrix
+@
+
+ If you remember from our discussion in class, for the treatment contrast representation the first column (which will be used to estimate the intercept) will be for the ``default'' level of the factor, which in this case will be \texttt{ParasitesNoParasites}, while the second column represents the deviation of the second group \texttt{ParasitesParasites} from the baseline. Remember that except for the first column, each additional dummy variable can be thought of as a true-false question. In this case, the second column represents the answer to the question ``Is this observation from the sample with parasites present?'', with 1 representing \texttt{TRUE} and 0 representing \texttt{FALSE}.
+ 
+ 
+If we wanted to use the cell means contrast, one quick and dirty way of doing it is fitting a model with \emph{No Intercept}, as follows:
+
+<<>>=
+model_cell_means <- lm(FinalDiversityIndex ~ 0 + Parasites, 
+  data=parasite.data) 
+  # This forces a zero intercept
+@
+
+If we look at the coefficients you will see they equal the means for each group.
+
+<<>>=
+coef(model_cell_means)
+div_ParY_mean
+div_ParN_mean
+@
+
+We can also look at how this produces a differently coded design matrix
+
+<<>>=
+head(model.matrix(model_cell_means)) 
+tail(model.matrix(model_cell_means)) 
+@
+
+Here each column represents a dummy variable asking a particular True-False question. For the first column the question is ``Is this observation from a population without parasites?'', while for the second column it represents the same as above ``Is this observation from a sample with parasites?''.
+
+While in many ways this seems like a much simpler way of thinking about the model, it is not without its difficulties. In particular interpreting the model is more difficult.
+
+<<>>=
+summary(model_cell_means)
+@
+
+A couple of things to notice. First the SE for the estimates are the same, as it is about the means assuming an overall common variance. So you have to go in and compute the difference (and the correct standard error), so it is more work to ask the question 'How are these treatment groups different from one another?'. The other thing to be aware of is that the co-efficient of determination $R^2$ from the cell means model is \textbf{INCORRECT}, so do not use it!
+
+We can still get confidence intervals on the estimates though. However, only use the cell means approach (in \textbf{R} anyways) for these estimates.
+
+<<>>=
+confint(model_cell_means)
+@
+
+And we can see they do not overlap. We  can also plot them. Indeed there is a handy function in the \texttt{arm} library (which you will need to install) called \texttt{coefplot} that is useful for examining the estimated coefficients.
+
+\begin{center}
+<<fig=T, echo=T>>=
+par(mfrow=c(1,1))
+arm::coefplot(model_1, int=T, var.las=0, 
+  h.axis=T, cex.pts=2, vertical=F, 
+  main= " Estimates treatment contrasts", lwd=3)
+@
+\end{center}
+Which shows 1 and 2 standard errors respectively (thin and thick lines). You can modify it to show the confidence intervals directly. This might be important if your sample sizes are small, as $2x$ the standard error will be narrower than the confidence intervals. 
+
+You can also use these for the cell means model.
+
+
+\begin{center}
+<<fig=T, echo=T>>=
+arm::coefplot(model_cell_means, int=T, var.las=0, 
+  h.axis=T, cex.pts=2, vertical=F, 
+  main= " Estimates cell means", lwd=3)
+@
+\end{center}
+
+Although I personally prefer to make my own plots since I do not like the default arguments in this.
+
+A couple of additional thoughts. Obviously if you have more than two groups (levels) for your categorical predictor, you need to remind yourself that all levels will be contrasted to the base level. If you want to choose which level will be the baseline, you can use the \texttt{relevel(NameOfFactor, "defaultLevel")} function. If you have many levels, interpreting individual co-efficients gets more complicated, but your readings delve more into that. In addition this is a good time to start using the standard Anova table that compares between group to within-group variance.
+
+
+<<>>=
+anova(model_1)
+@
+
+Now let us discuss in class how best to evaluate how important a predictor \texttt{Parasites} might be...
+
+\end{document}

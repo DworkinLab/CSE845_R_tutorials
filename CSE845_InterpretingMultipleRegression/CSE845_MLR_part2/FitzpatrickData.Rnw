@@ -1,0 +1,441 @@
+\documentclass[a4paper]{article}
+\usepackage{amsmath}
+\usepackage{natbib}
+
+\newcommand{\R}{{\bf R}}
+\newcommand{\rt}[1]{\texttt{#1}}
+
+\title{CSE845 - Interpreting multiple linear regression part 2 - Phenotypic selection analysis} 
+\author{Ian Dworkin}
+
+% Use the bibtex style
+\bibliographystyle{amnat}
+
+% Remove brackets from numbering in List of References
+\makeatletter
+\renewcommand{\@biblabel}[1]{\quad#1.}
+\makeatother
+
+\begin{document} 
+\maketitle
+\date
+
+% Natbib examples:
+%\citep{} is for parenthetical citations. It can take single citations or multiple
+% \citep{Lande:1983uw} => (Lande and Arnold, 1983)
+%
+% \citep{kingsolver_strength_2001, hoekstra_strength_2001, kingsolver_patterns_2007} =>
+%        (Hoekstra et al., 2001; Kingsolver et al., 2001; Kingsolver and Pfennig, 2007)
+%
+%\citet{} is for textual citations. 
+% We used the \citet{Lande:1983uw} approach to examine selection =>
+%      We used the Lande and Arnold (1983) approach to examine selection
+%
+%\citep[see]{} can be used when you want to add the text "see" to the beginning fo the reference list
+% \\citep[see][]{svensson_selective_2007} => (see Svensson and Friberg, 2007)
+%
+%\citetext{} is used to add any string of characters to the beginning of the citation along with \citealp
+%\citealp creates the citation without parentheses (the al stands for alternate) as so:
+% \citealp{Lande:1983uw} => Lande and Arnold, 1983
+%citetext{} creates a set of text surrounded by parenthesis as so:
+% \citetext{but see \ldots} => (but see...)
+%Combining them creates the proper parenthetical citation with the desired text and citation inside
+% \citetext{but see \citealp{Lande:1983uw}} => (but see Lande and Arnold, 1983)
+%
+%The full reference sheet is available at http://www.ctan.org/pkg/natbib
+
+<<echo=F>>=s
+options(show.signif.stars=F)
+options(digits=3)
+@
+
+<<echo=F>>=
+require(car)
+require(arm)
+require(effects)
+require(MASS)
+@
+
+<<echo=F>>=
+# condition number for multi-colinearity
+ConditionNumber <- function(X){
+    mod.X <- model.matrix(X)
+    eigen.x <- eigen(t(mod.X) %*%mod.X)
+    eigen.x$val # eigenvalues from the design matrix
+    sqrt(max(eigen.x$val)/min(eigen.x$val))
+}
+
+
+Rsq <- function( model ){
+	fitted.variance <- var(model$fitted)
+	total.variance	<- var(model$fitted) + var(model$resid)
+	fitted.variance / total.variance
+}
+
+# You could also just use the following to give you the unadjusted R2
+# summary(your.model.object)$r.sq
+
+# Or for the adjusted R2
+#summary(model.crap)$adj.r
+
+
+# Here is the function to compute all of the partial R2, the overall model R2 (unadjusted and adjusted). This should work for any lm model object.
+PRsq <- function( model ){
+	residual.variance <- var(model$resid)
+	variables <- attr(terms(model), "term.labels")
+		model.length <- length(variables)
+		variable.name <- rep(NA, model.length )
+		partial.Rsq <- rep(NA, model.length )
+		univariate.Model.Rsq <- rep(NA, model.length )
+			
+	for (i in 1:model.length){
+		variable.name[i] <- variables[i]
+		drop <- parse( text=variables[i] )
+		new.formula <- as.formula( paste( ".~.-", variables[i], sep=""))
+		new.model <- update(model, new.formula )
+		partial.Rsq[i] <- (var(new.model$resid) - residual.variance)/ var(new.model$resid)
+		
+		new.formula.univariate <- as.formula( paste( ".~", variables[i], sep=""))
+		univariate.model <- update(model, new.formula.univariate)
+		univariate.Model.Rsq[i] <- summary(univariate.model)$r.sq
+		}
+	
+	R2 <- Rsq( model )
+	adj.R2 <- summary(model)$adj.r
+	
+	partials <- data.frame(partial.Rsq, univariate.Model.Rsq )
+	row.names(partials) <- variable.name
+	
+	list(FullModelRsquared=R2, FullModelAdjustedR2 = adj.R2, partials=partials	)
+}
+@
+
+\section{Expected background}
+Since this is part two of the tutorial on multiple linear regression, focusing on a real biological example, please make sure you have read, run through the code (and did the suggested activities) for part 1.
+
+\section{Multiple regression and the analysis of phenotypic natural selection}
+One of the most important studies was published 30 years ago by Russ Lande and Steve Arnold.\citep{Lande:1983uw}. Following on a series of theoretical papers by Lande and others, this paper connected the quantitative genetic theory (and to some extent Price's theorem) relating the covariation between phenotypes and measures of fitness to get quantitative estimates of phenotypic natural selection. Importantly (and conveniently) this work was expressed in the language of multiple linear regression, which had already been used for several decades to look at the relationship between observed measures of fitness and phenotypic variation.  While we do not have time to delve into the details here, I highly recommend the book \textsf{Evolutionary Theory: Mathematical and conceptual foundations} by Sean Rice \citep{rice2004evolutionary}. If you have taken PLB849, Dr. Jeff Conner has already introduced many of the ideas. If not check out his book \citep{conner2004primer}, or this great review by Katrina McGuigan \citep{mcguigan2006studying}.
+
+\section{the influence of sperm characteristics on fertilization success}
+For this tutorial we will use the data from the paper \textsf{Complex patterns of multivariate selection on the ejaculate of a broadcast spawning marine invertebrate} \citep{EVO:EVO1627}. The paper is in the course folder, although as you will immediately see they have taken a somewhat more advanced approach that examines both linear (directional, $\mathbf{\beta}$), as well as quadratic and correlational selection (the so-called gamma matrix, $\mathbf{\gamma}$), fit using a \emph{response surface method} and performing a \emph{canonical rotation}. Happily we are not going to do any of that for this tutorial. Instead we are going to focus on just a couple of sperm related traits as our predictors; \rt{MeanFlagellumLength\_uM} and \rt{SpermMotilityPC1}.
+
+\section{importing, and checking the data}
+The data \citep{dryad_307c3n10} can be found at datadryad.org, which is a repository for  a great deal of raw data from studies in ecology and evolution (and you should put all of your published there or other public repositories). It actually had a few little formating issues, so for simplicity I have already cleaned up these formatting issues for you. If you look at the \rt{.R} code associated with this tutorial you will see how you would otherwise grab the data directly from dryad.
+
+<<echo=F>>=
+# Normally read it in like this
+# spawn_data <- read.table("http://datadryad.org/bitstream/handle/10255/dryad.37940/Fitzpatrick_et_al_Selection_Data.txt", h=T, skip=1) # skipping first line of labels but there were a couple of minor issues that needed to be fixed.
+@
+
+<<>>=
+spawn_data <- read.table("http://beaconcourse.pbworks.com/f/Fitzpatrick_et_al_Selection_Data.txt", h=T)
+@
+
+Let's take a look at the data:\\
+<<>>=
+dim(spawn_data)
+str(spawn_data)
+cov(spawn_data)
+@
+Notice the covariances and correlations are all over the place. This is in part because the scales of the observed variables really differ alot.
+<<>>=
+cor(spawn_data)
+@
+We should start by looking at the correlations among the variables and basic EDA. An exercise I leave to you to perform (it is important, but makes the tutorial too long)
+
+\section{scaling the data}
+Consistent with the approach advocated by Lande and Arnold \citep{Lande:1983uw}, the measure of fitness (\rt{ProportionFertilized}) is scaled by the mean so population mean fitness is now 1. fertilization rates are our measure of fitness. We need to scale this by the mean for mean relative fitness which is the "standard' approach for most analyses of phenotypic selection.
+<<>>=
+spawn_data$ProportionFertilized <- with(spawn_data, 
+    ProportionFertilized/mean(ProportionFertilized))
+@
+Population mean fitness is now scaled to 1
+<<>>=
+mean(spawn_data$ProportionFertilized)
+@
+
+We will want to standardize our predictors for two reasons. First many are on different scales (volumes, number of sperm per $\mu$L, age in minutes, etc). Second the "standard" approach to phenotypic selection analysis is to standardize (center and scale by standard deviation). This allows the results from different studies to be compared more easily. Others (namely David Houle) have advocated for scaling by the mean for a number of reasons, however I will not go into that here. 
+
+Even though we will only use a few predictors, we will standardize the data for all 7  predictors, and add on the relative fitness.
+<<>>=
+spawn_data_scaled <- data.frame(spawn_data[,1], scale(spawn_data[,-1]))
+colnames(spawn_data_scaled)[1] <- "ProportionFertilized" # add name of column back on.
+
+summary(spawn_data_scaled)
+str(spawn_data_scaled)
+@
+We can look at the correlations and covariances among our two predictors. Note that the covariances and correlations are now equal since as a result of standardizing the variables.
+<<>>=
+#This just shows that all the elements are equal.
+identical(cor(spawn_data_scaled[,2:8]), cor(spawn_data_scaled[,2:8]))
+@
+\\
+
+We will start by using just two predictor variables (\rt{MeanFlagellumLength\_uM} and \rt{SpermMotilityPC1}). We will first investigate if there is any evidence for non-linearity that needs to be considered.
+\begin{center}
+<<echo=F, fig=T>>=
+par(mfrow=c(2,1))
+plot(ProportionFertilized ~ MeanFlagellumLength_uM, 
+    data=spawn_data_scaled, pch=16)
+with(spawn_data_scaled,
+    lines(lowess(x=MeanFlagellumLength_uM, y =ProportionFertilized), lwd=2, col="red"))
+plot(ProportionFertilized ~ SpermMotilityPC1, 
+    data=spawn_data_scaled, pch=16)
+with(spawn_data_scaled,
+    lines(lowess(x=SpermMotilityPC1, y =ProportionFertilized), lwd=2, col="red"))
+@
+\end{center}
+Possibly some non-linearity for motility?\\
+
+Are motility and flagellum length correlated?
+\begin{center}
+<<fig=T, echo=F>>=
+par(mfrow=c(1,1))
+plot(MeanFlagellumLength_uM ~ SpermMotilityPC1, 
+    data=spawn_data_scaled, pch=16)
+with(spawn_data_scaled,
+    lines(lowess(x=SpermMotilityPC1, y =MeanFlagellumLength_uM), lwd=2, col="red"))
+@
+\end{center}
+Not very correlated, so we do not expect much colinearity, and probably not major influences on the estimates. Obviously there is other EDA that needs to be done, but I will leave that for an exercise for you.
+
+\section{model fitting}
+let's start with a model fit that includes both SpermMotility, flagellumLength, their interaction and also the quadratic term for motility. 
+
+<<>>=
+model_1 <- lm(ProportionFertilized ~ MeanFlagellumLength_uM + SpermMotilityPC1 +
+     MeanFlagellumLength_uM:SpermMotilityPC1 + I(SpermMotilityPC1^2),
+     data= spawn_data_scaled)
+summary(model_1)
+@
+
+Well not much going on here, maybe a bit of evidence for a quadratic effect, but the model (especially looking at adjusted $R^2$ really does not account for much.). Still let's use this to take a deeper look.
+
+# We might want go through some model selection (then again), but for the moment let us assume that this is the ideal model that we want to fit.  We need to think about how to interpret everything. Since everything has already been scaled we can interpret the coefficients directly. So let's look at the coefficients and CI's.
+<<>>=
+print(cbind(summary(model_1)$coef[,1:2], confint(model_1)), digits=2)
+@
+
+So mean fitness as measured by fertilization success by ~0.5\% for every standard deviation increase in sperm length. Since the observed standard deviation for this is only \Sexpr{print(sd(spawn_data$MeanFlagellumLength_uM), digits=3)} this means an expected increase ($\pm$ 2 standard deviations) of ~2\%. This is small but for a fitness effect, may still be biologically important. However, the CIs are really quite large (and cross over 0) compared to the estimate itself. The influence of motility and the interaction between motility and flagellum length seems to be even smaller (and less likely to be real). However the quadratic effect on sperm\_motility seems to be an interesting candidate, and may even suggest some form of disruptive selection based on our initial figure (with loess), and the results presented. 
+
+\section{visualizing the model}
+How might we examine the influences graphically? We have a number of options that are worth considering, and we will go through them here. 
+\subsection{added variable plot}
+We can start with \emph{added variable} plots (sometimes called partial plots). As one might expect for a multiple regression problem this examines the influence of a particular predictor on the response \emph{adjusted} for all other predictors in the model. One convenient way of doing this in \R\ is to use the \rt{avPlots()} in the \rt{car} library.
+\begin{center}
+<<fig=T, echo=F>>=
+avPlots(model_1)
+@
+\end{center}
+
+This is useful, but I prefer to see confidence intervals, so we can also use an effects from the \rt{effects} library.
+<<>>=
+eff <- allEffects(mod=model_1)
+@
+
+\begin{center}
+<<fig=T, echo=F>>=
+plot(eff[1], ylab="Relative Fitness")
+#plot(eff[2], ylab="Relative Fitness") # for interaction term.
+@
+\end{center}
+
+There are prettier figures that can be made, but not with pre-made functions I know about. In either case these can be helpful, and can easily be extended to a rather large number of predictor variables.
+
+\subsection{perspective plots}
+However, since we have only the two observed predictor variables we can also use some perspective and contour plots.
+Perspective plots can be tricky, as trying to get a nice looking representation of the 3D surface in 2D can sometimes be a pain.  If only had a few coefficients (and just fitting a plane) then using the \rt{predict()} function might be straightforward, but here we will right our function for the model to predict values.
+
+We are going to first generate ordered sequences of data for our two predictors. We could just sort the observed, but in this case I am generating an equally spaced sequence for each limited by the observed range of values.
+
+<<>>=
+n <- 50 # # of points we want
+MF <- with(spawn_data_scaled, seq(min(MeanFlagellumLength_uM), max(MeanFlagellumLength_uM), length.out=n))
+SM <- with(spawn_data_scaled, seq(min(+ SpermMotilityPC1), max(SpermMotilityPC1), length.out=n))
+@
+
+We also want to extract the estimated parameters from the model we fit
+<<>>= 
+params <- coef(model_1) # parameters from the model
+@
+
+Now we go about writing a function that generates the expected (predicted) values for our measure of fitness. As I mentioned before, the predict function does this, but for more complicated models it is often easier to write your own.
+
+<<>>=
+f <- function(x=MF,y=SM){
+	z <- params[1] + params[2]*x + params[3]*y + params[4]*(y^2) + params[5]*x*y}
+@
+
+
+Now we use the \rt{outer} function to generate predicted values of mean fitness for all combinations of sperm motility and length.
+<<>>=
+z <- outer(X=MF, Y=SM, f)
+@
+
+While I will not do it in this tutorial, I highly recommend that you take a look at what has been generated by outer (the predicted fitness values).
+
+At this point I am hiding some of the underlying \R \ code since it is a bit messy. However it is all available in the \rt{.R} file.
+<<fig=F, echo=F>>=
+res = persp(x=MF,y=SM,z, theta=75, phi=0,, zlim=c(0.7, 1.4))
+@
+
+\begin{center}
+<<fig=T, echo=F>>=
+# look at ?persp for more information
+persp(x = MF,y = SM, z,
+    theta=70, phi=0, box=T, col="#FF000075", shade=0.05, ticktype="detailed", lphi=180,
+    xlab= "MF", ylab = "SM", zlab="predicted fitness", axes=T, 
+    xlim=range(MF), ylim=range(SM), zlim=c(0.7, 1.4), border=F,
+    main="influence of sperm motility and length on fitness")
+    
+# uses the trans3d function to project into the right perspective based on pmat=res     
+mypoints <- with(spawn_data_scaled, 
+    trans3d(x=MeanFlagellumLength_uM, y=SpermMotilityPC1, z=ProportionFertilized, 
+    pmat=res))   
+
+#adds points back on in the correct perspective
+points(mypoints, pch=16, cex=1, 
+    col=densCols(x=spawn_data_scaled$MeanFlagellumLength_uM, 
+        y=spawn_data_scaled$SpermMotilityPC1, nbin=20))
+@
+\end{center}        
+It is clear that we have sparse data, and the model does not really capture much of the variation. One thing that can happen (although is less of a problem here) is that surface may contain regions with very little data. These plots can be a bit helpful with respect to this, although contour plots (below) can help more.
+
+Generating useful perspective plots  can be ridiculously frustrating sometimes. While I am not calling the code here, I have embedded some useful ways of doing it using the \rt{scatter3D} function in \rt{car} which works with rgl to allow you to generate animations and rotate it. You may also wish to check out \rt{Scatterplot3D} library which apparently has a very straightforward interface.
+
+
+<<fig=F, echo=F>>=
+#scatter3d(ProportionFertilized ~ MeanFlagellumLength_uM + SpermMotilityPC1, fit="linear", data=spawn_data_scaled)
+
+#scatter3d(ProportionFertilized ~ MeanFlagellumLength_uM + SpermMotilityPC1, fit="additive", data=spawn_data_scaled)
+
+#scatter3d(ProportionFertilized ~ MeanFlagellumLength_uM + SpermMotilityPC1, fit=c("quadratic", "additive"), data=spawn_data_scaled)
+
+scatter3d(ProportionFertilized ~ MeanFlagellumLength_uM + SpermMotilityPC1, fit="quadratic", data=spawn_data_scaled)
+@
+
+\subsection{contour plots}
+I personally find these far more intuitive since the third dimension is represented by contour lines and false colouring. They also happen to be easier to code!
+\begin{center}
+<<echo=F, fig=T>>=
+contour(z=z, x=MF, y=SM, col="black",  ylab="motility", xlab="sperm length")
+
+with(spawn_data_scaled, 
+    points(x=MeanFlagellumLength_uM, y=SpermMotilityPC1, 
+    col=densCols(x=MeanFlagellumLength_uM, y=SpermMotilityPC1, nbin=20), 
+    pch=16, cex=0.9 ))
+@
+\end{center}
+
+This might be more useful as it uses the heat map colors to demonstrate the observed values of the fitness overlayed on top of the contours of predicted fitness.
+\begin{center}
+<<echo=F, fig=T>>=
+hc <- topo.colors(10)         
+spawn_colors <- as.numeric(cut(spawn_data_scaled[,1], 10))# breaks it into 10 groups based on values, assigns #1-10
+
+contour(z=z, x=MF, y=SM, col="black", xlim = c(-2.75, 2.55), 
+ ylab="motility", xlab="sperm length", lwd=2)
+
+with(spawn_data_scaled, 
+    points(x=MeanFlagellumLength_uM, y=SpermMotilityPC1, 
+    col=hc[spawn_colors], 
+    pch=16, cex=1.1 ))
+legend(x=2.0,y=-0.25, fill=hc[1:10], 
+    legend=c(0.75,0.8,0.86,0.92,0.97, 1.03, 1.09,1.14,1.2,1.26), border=F, bty="n")
+@
+\end{center}
+Or alternatively you could use the \rt{filled.contour} function.
+\begin{center}
+<<echo=F, fig=T>>=
+tc <- gray(1:10/10) # 10 shades of gray.
+par(mfrow=c(1,1))
+with(spawn_data_scaled, filled.contour(z=z, x=MF, y=SM, 
+    ylim=c(min(SM), max(SM)), xlim=c(min(MF), max(MF)), 
+    xlab="sperm length", ylab="motility", color = heat.colors,
+    # to plot points in the squished frame set up by filled.contour use...
+    plot.axes={axis(1); axis(2); # puts back axis
+    	points(x=MeanFlagellumLength_uM, y=SpermMotilityPC1, pch=16, cex=0.9, # call points like you would externally
+        #col=densCols(x=MeanFlagellumLength_uM, y=SpermMotilityPC1, nbin=20))
+        col=tc[spawn_colors])
+        },
+    main="influence of sperm length and motility on fitness"))
+@
+\end{center}
+
+\subsection{coefficient plots}
+We can also use coefficient plots as well. I have surpressed the intercept here, as it has no meaning.
+\begin{center}
+<<fig=T, echo=F>>=
+coefplot(model_1, int=F, h.axis=T, vertical=F, var.las=2, 
+  mar= c(10,3,5.1,2), main= "estimated parameters")
+@
+\end{center}
+
+\section{model diagnostics}
+Let's do some basic examination of model diagnostics. First we can use the standard plotting diagnostics for linear models.
+
+\begin{center}
+<<fig=T, echo=F>>=
+par(mfrow=c(2,2))
+plot(model_1)
+@
+\end{center}
+Nothing seems particularly amiss here. We can also look at the residuals against the observed values of the predictors.
+
+\begin{center}
+<<fig=T, echo=F>>=
+par(mfrow=c(2,1))
+plot(model_1$resid ~ spawn_data_scaled$MeanFlagellumLength_uM,
+    pch=16, xlab = " Mean Flagellum Length", ylab = "residuals")
+plot(model_1$resid ~ spawn_data_scaled$SpermMotilityPC1,
+    pch=16, xlab = " Sperm Motility PC1", ylab = "residuals")
+@
+\end{center}
+It does seem like there is any substantial changes in the distribution of variation across the range of values for the predictors either. We could go on with these, but we have done them in previous tutorials, so look back at some other tools for model diagnostics
+
+\subsection{checking for colinearity}
+Given how little correlation there was between the observed values for the two predictors, we probably do not expect much colinearity, but let us do a couple of checks anyways.
+<<>>=
+#print(cov2cor(vcov(model_1)), 1) # run yourself
+vif(model_1) 
+ConditionNumber(model_1)
+@  
+Nothing suggests that there is any substantial colinearity, which is great. You could also use the \rt{confidenceEllipse} from \rt{car} library, but I leave that as an exercise for you to do.
+
+\section{model evaluation}
+In addition to graphical representations of the model fit, we want to evaluate the fit. The based way of doing this is looking at the coefficients of determination $R^2$ for the model. We can get this from the model summary.
+<<>>=
+summary(model_1)$r.sq
+summary(model_1)$adj.r.sq
+@ 
+\\
+Or we can visualize this with a plot
+\begin{center}
+<<fig=T, echo=F>>=
+with(spawn_data_scaled, 
+  plot(ProportionFertilized ~ fitted(model_1), 
+      xlim=c(min(ProportionFertilized), max(ProportionFertilized)),
+      ylim=c(min(ProportionFertilized), max(ProportionFertilized)),
+      ylab= "observed ProportionFertilized",
+      col=densCols(fitted(model_1))))
+ abline(a=0, b=1,lty=3)  
+@
+\end{center}
+
+\subsection{partial $R^2$}
+Since there are multiple predictors (that are at least a bit correlated) there is some redundant information in them. Therefore we can use partial $R^2$ which allow us to evaluate the relatively explanatory ability of each predictor. there is some functionality in the \rt{asbio} library, but we have included our own function that makes this easier.
+
+<<>>=
+PRsq(model_1)
+@
+ 
+ Which not surprisingly shows us what we already gathered, we can account for very little of the observed variation in fitness with the predictors in this model
+
+\section{What happens when there are lots of predictors}
+
+When you have lots of potential predictor variables, many of the contour and perspective plot tools may not be as valuable, but most of the other aspects discussed here are quite useful.
+
+% The bibtex filename
+\bibliography{template}
+
+\end{document}       

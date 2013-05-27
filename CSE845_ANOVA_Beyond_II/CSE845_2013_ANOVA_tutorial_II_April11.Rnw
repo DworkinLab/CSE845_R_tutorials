@@ -1,0 +1,367 @@
+\documentclass[a4paper]{article}
+\title{CSE845 Two way ANOVA with interaction terms} 
+\author{Ian Dworkin}
+\begin{document} 
+\maketitle
+\date
+
+<<echo=F>>=
+#changing some options to make printing prettier for the document
+options(show.signif.stars=F)
+options(digits=3)
+@
+\section*{Introduction}
+
+We will continue this tutorial right where we left off with the simple so called one-way ANOVA (so you may wish to review that one first). Now we will investigate the influence of two categorical predictors, the consequences of recombination (\texttt{Sex}) and the presence or absence of parasites (\texttt{Parasites}), and how they influence ecological diversity (based on number of tasks performed) measured in Avidians.  This data represents the endpoints of Avida runs (100,000 updates).
+
+ Our response variable remains \texttt{FinalDiversityIndex}. In addition to examining \texttt{Sex} and \texttt{Parasites}, we will also examine their interaction, and include \texttt{HostMutationRate} back into the model.
+ 
+  
+We will make use of a few libraries which we need to load in (you may need to install as well your first time):
+<<>>=
+require(car)
+require(sciplot)
+require(arm)
+@
+
+Read in the data, and convert both \texttt{Sex} \& \texttt{Parasites} to factors like we did in the previous tutorial.
+
+<<>>=
+parasite.data <- read.csv('http://beaconcourse.pbworks.com/f/sexAsex.csv', h=T)
+parasite.data$Sex <- factor(parasite.data$Sex, 
+  levels=c(0,1), labels=c("NoSex", "Sex"))
+parasite.data$Parasites <- factor(parasite.data$Parasites, 
+  levels=c(0,1), labels=c("NoParasites", "Parasites"))   
+@
+
+\section*{Getting interpretable effect sizes from the ANOVA}
+
+Since we did visual examinations of the data in the previous tutorial (which you may wish to keep the PDFs open to refer to), we will move right onto fitting the model in \textbf{R}
+
+<<>>=
+model_1 <- lm(FinalDiversityIndex ~ Parasites, 
+  data=parasite.data)
+summary(model_1)
+confint(model_1)
+@
+
+What does this tell us? First that the mean for \texttt{FinalDiversityIndex} for those samples from the\texttt{NoParasites} treatment is 1.72 with standard error of 0.054 and 95\% Confidence Intervals from $1.62-1.83$. 
+
+``What is the effect of adding parasites to final diversity in the population?'' This is the question we did this experiment to (in part) address. The coefficient (parameter estimate) for \texttt{ParasitesParasites} is what we need to focus our attention to. The coefficient of $\sim$ 1.47 with 95\% CI $1.32-1.62$ tells us that the presence of Parasites in the populations increases final diversity by an average of 1.47 tasks, but with a high degree of certainty we would believe that the ``true'' value is likely an increase somewhere between $1.32 - 1.62$ tasks (remember the caveat of interpreting frequentist confidence intervals). The 95\% Confidence Intervals do not overlap with 0 suggesting that we have a pretty decent degree of certainty that this effect is ``real''. 
+
+The next important step is to figure out how ``big'' or biologically ``important'' an effect this is. This is an \emph{essential} part to your analysis (along with plotting fitted values), as it helps to put the effects in a context that your readers will be able to understand, even if they are not particularly familiar with the system. Perhaps a better way is by asking the question ``Is an increase of an average of 1.47 tasks biologically important?'' These questions are the domain of 'effect sizes'. There are a number of useful reviews out there that I recommend, one of which is referenced at the end of this document. However, it is useful to have a measure of effect size that is both unit-less and scale invariant, so we commonly use either the standard deviation or the mean of the response variable to scale our estimates. In addition we also consider the co-efficient of determination $R^2$ to assess how much of the observed variation in the response variable can be accounted for.
+
+``How much greater is host diversity in the presence of parasites?'' One simple measure is to simply scale the mean with parasites by the mean without parasites.
+
+<<>>=
+model_coef <- as.numeric(coef(model_1)) 
+  # just for convenience
+sum(model_coef)/model_coef[1]
+@
+
+Suggesting that with parasites the populations are on average $\sim 1.85$ times as diverse as populations without parasites. We can use confidence intervals to get approximations on this increase (monte carlo simulations, empirical resampling and MCMC provide more general approaches to this and will be discussed in ZOL851).
+
+<<>>=
+(confint(model_1)[2,1] + model_coef[1])/model_coef[1]
+(confint(model_1)[2,2] + model_coef[1])/model_coef[1]
+@
+Providing approximate lower and upper boundaries (hint using the predict function is usually easier to use for getting CIs).
+
+We could also just ask how much diversity parasites add over and above the ``baseline'' diversity without parasites:
+
+<<>>=
+model_coef[2]/model_coef[1]
+confint(model_1)[2,1]/model_coef[1]
+confint(model_1)[2,2]/model_coef[1]
+@
+
+Which is a pretty similar question, with a highly related answer as you can see. In this case we used the mean of the baseline group. Some advocate this, but others prefer the mean for the whole sample. It can really depend on the question you are asking though. You need to think very carefully about the biological question to help you to make this decision.
+
+\subsection*{scaling by standardization}
+The other approach to scaling (and making unit-less) is by ``standardizing the data'', scaling with the standard deviation for the sample in some fashion. The standard deviation to be used (i.e. from the whole sample, for just the ``control'' group or a pooled measure of sd) should depend on your question. For most manipulative experiments, where there is some form of a ``control'' group, usually the sd of the control would be used. Therefore you would examine the treatment contrast (the difference in means between the two groups) scaled by the standard deviation of the control group.\\
+\\
+$ \frac{\bar{x}_T  -  \bar{x}_C} {s_C}$\\
+
+Where $\bar{x}_T$ is the estimated mean for the treatment group, $\bar{x}_C$ is the estimated mean for the control group, and $s_C$ is the estimated standard deviation (\textbf{not the standard error!!}) for the control group. For our example we would write (in \textbf{R}):
+
+<<>>=
+diversityNoPar <- subset(parasite.data, Parasites=="NoParasites")
+model_coef[2]/sd(diversityNoPar$FinalDiversityIndex)
+confint(model_1)[2,1]/sd(diversityNoPar$FinalDiversityIndex)
+confint(model_1)[2,2]/sd(diversityNoPar$FinalDiversityIndex)
+@
+Wow, this is a pretty profound effect. This says that with Parasites present, diversity of tasks performed increases by 1.8 standard deviations (relative to the controls), with our 95\% CIs suggest the increase is between 1.63-2 standard deviations. 
+
+One other general approach is to used a measure of pooled standard deviation. This is not the same as just treating all of the observations as if they came from a common sample, but instead computing $s_T$ \& $s_C$ and then pooling these together. The $s_{pooled}$ is calculated as follows\\
+
+$ s_{pooled} = \sqrt{ \frac{(n_T - 1)s^{2}_T + (n_C - 1)s^{2}_C } {n_C + n_T - 2} }$\\
+\\
+Which is then used as the demoninator, with the same numerator (the treatment contrast) as above. Here $n_T$ \& $n_C$ are the samples sizes for the treatment and control groups respectively. $s^{2}_T$ \& $s^{2}_C$ are the variances for the treatment and control groups respectively.
+
+<<>>=
+diversityPar <- subset(parasite.data, Parasites=="Parasites")
+var_diversity_Par <- var(diversityPar$FinalDiversityIndex)
+  # variance for one subset
+var_diversity_NoPar <- var(diversityNoPar$FinalDiversityIndex)
+  # variance for the other
+n_Par <- nrow(diversityPar)
+  # number of observations for one subset
+n_NoPar <- nrow(diversityNoPar)
+  # number of observations for the other subset
+sd_pooled <- sqrt( (((n_Par - 1)*var_diversity_Par) + 
+                   ((n_NoPar - 1)*var_diversity_NoPar))
+                     /(n_Par + n_NoPar - 2))
+
+model_coef[2]/sd_pooled                    
+confint(model_1)[2,1]/sd_pooled
+confint(model_1)[2,2]/sd_pooled
+@
+
+Which gives us a pretty similar result to what we got with just scaling with the standard deviation from the control group. As long as the standard deviations for each group are pretty similar, it should be give pretty similar results.
+
+Of course if we wanted to be boring we could just look at the ANOVA table,
+<<>>=
+anova(model_1)
+@
+
+But hopefully now you realize that the information in the ANOVA table isnow far more useful in the context of our estimated effect sizes.
+
+\section*{Sex as a categorical predictor, and how it interacts with the presence of parasites}
+
+Just as we have done for \texttt{Parasites} we can run a simple linear model to examine the influence of recombination on diversity of tasks performed.
+
+<<>>=
+model_2 <- lm(FinalDiversityIndex ~ Sex, 
+  data=parasite.data)
+summary(model_2)
+confint(model_2)
+@
+
+While perhaps not as substantial an effect as we saw for the presence of parasites, it is still clearly an important contributor. The magnitude of effect suggests that populations that were allowed to have recombination had an average increase of 0.8 tasks (with 95\%CI $0.64-1.0$) compared to the populations without recombination that had an average of 2.0 tasks. We could (and probably should) go in and examine standardized measures (and think how you should go about doing so if you want to compare the effects of recombination and parasites). However, we really should be starting to think about incorporating the influence of both \texttt{Sex} \& \texttt{Parasites} into a single model. This is really just the same as the multiple regressions that we have performed before, except that when it is two categorical predictors (factors), we describe this as a \emph{two-way ANOVA}. 
+
+It actually helps to plot out the means for the different groups to assess what is going on. There are lots of different functions to do this, and the \texttt{lattice} library really specializes in this. However, to keep things simple we will just you a simple function \texttt{lineplot.CI} in the \texttt{sciplot} library.
+
+\begin{figure}
+\begin{center}
+<<fig=T, echo=T, label=InteractionPlot>>=
+lineplot.CI(x.factor=Parasites, response = FinalDiversityIndex,
+  group=Sex, data = parasite.data, lwd=3,
+  ylab = "task diversity", xlab = "Parasites",
+  x.leg = 1, y.leg = 3.25, 
+  ci.fun= function(x) c(mean(x)- 2*se(x), mean(x)+ 2*se(x)))
+  # note: excluding the ci.fun line will default to one SE, instead of 2
+@
+\end{center}
+\caption{Interaction Plot for Parasites and Sex on diversity of tasks}
+\end{figure}
+
+This is a so-called interaction plot, as it allows us to examine if and how the two factors we are investigating may interact in some way. However, for this data set, it appears that while there is a clear influence of both sex and parasites, the fact that the slopes of the lines are nearly parallel (which I was somewhat surprised to find) suggests that we probably do not need to consider an interaction to allow for varying slopes in treatment combinations. So we will go ahead and fit the two-way ANOVA (multiple regression) model as follows"
+
+<<>>=
+model_3 <- lm(FinalDiversityIndex ~ Sex + Parasites, 
+  data=parasite.data)
+summary(model_3)
+confint(model_3)
+@
+
+The intercept now represents the mean of the data subset with no recombination and no parasites. The \texttt{SexSex} coefficient represents the deviation for those with recombination, all else being held constant. Ditto for \texttt{ParasitesParasites}. I will leave as a (very useful) exercise your time calculating the group means and comparing to the parameter estimates.
+
+We also see that our $R^2$ is pretty substantial for this model, which means we can account for a lot of the observed variation in \texttt{FinalDiversityIndex}. A plot of fitted VS. observed may be useful.
+\begin{figure}
+\begin{center}
+<<fig=T, echo=F, label=FittedVsObserved>>=
+plot(parasite.data$FinalDiversityIndex ~ fitted(model_3), 
+  xlim=c(0,5), ylim=c(0,5), pch=16, cex=1.3,
+  xlab = expression(paste("fitted values, ", hat(y))),
+  ylab = "observed values of y")
+abline(a=0, b=1, lwd = 2, col="grey")  
+@
+\end{center}
+\caption{Plot of fitted values ($\hat{y}$) VS. observed values (y) of the response}
+\end{figure}
+Which shows that we are certainly capturing some, but not all of the observed variation. We should also look at diagnostic plots for the model fit (which look pretty reasonable and you should be able to examine these on your own)
+
+We can also ask how much the parameter estimates are changing across these models. This is the really useful aspect to the \texttt{coefplot()} in \texttt{arm}.
+
+\begin{figure}
+\begin{center}
+<<fig=T, echo=F, label=CoefPlots>>=
+par(mfrow=c(1,1))
+coefplot(model_3, int=T, var.las=0,
+  h.axis=T, cex.pts=2, vertical=F, 
+  main= " Comparing estimates for different models", lwd=3,
+  ylim=c(0.5,2.5))
+coefplot(model_2, int=T, var.las=0, add=T,
+  h.axis=T, cex.pts=2, vertical=F, col="red")
+@
+\end{center}
+\caption{How does the structure of the model influence the estimates?}
+\end{figure}
+
+\pagebreak
+\section*{Including Interaction effects in the model}
+Even though our interaction plot suggested that there was no evidence for an interaction between parasites and sex, for the purposes of demonstration let us fit a model with an interaction and compare it to what we found with the model with both sex and parasites (but that excluding the interaction effect).
+
+In \textbf{R} when we want to express an interaction term for a model (and other instances) we use a colon (:). So if we have a model with two predictors, a \& b we would use:\\
+\texttt{lm(y \~{} a + b + a:b)}\\
+or alternatively use the * symbol as a short cut for the same model:\\
+\texttt{lm(y \~{} a*b)} which expands out to \texttt{a + b + a:b}.
+
+So now we fit the model:
+<<>>=
+model_4 <- lm(FinalDiversityIndex ~ Sex*Parasites, 
+  data=parasite.data)
+summary(model_4)
+confint(model_4)
+@
+
+Clearly the interaction term is small, with large uncertainty, and confidence intervals that considerably overlap 0. Also the p-value associated with the t-test (testing whether it is different from zero) suggests ``non-significant''. We can also do a more formal comparison between models 3 \& 4 using \texttt{anova()}
+
+<<>>=
+anova(model_3, model_4)
+@
+We can also use information theoretic criteria to help us compare models. In particular we will use \emph{Akaike's Information Criterion, AIC}. While we do not have much time to get into it here, you can read more a bit these approaches in \emph{Gotelli \& Ellison} on pages 285-286. If you are planning on taking ZOL851, we go into great detail about these approaches. 
+
+It is sufficient for the moment to point out that higher AIC values suggest poorer fits, so lower is ``better''. $\Delta{AIC}$ values (comparing all models to the one with min(AIC)) less than 2 suggests the two models are providing approximately the same fit, while $\Delta{AIC} > 10$ strongly suggest that the model with the lowest is a far better fit. $\Delta{AIC}$ values between 2-10 suggest that there is still some non trivial probability that the model is in fact the \emph{best approximating model}.
+
+<<>>=
+print(AIC(model_1, model_2, model_3, model_4), digits=4)
+@
+
+Suggesting that the models with and without the interaction are providing more or less the same fit. In fact they are providing the same basic fit (in terms of the joint probability), but the model with the interaction is being penalized for the estimation of an additional parameter (as it should be). So essentially, this is (like the ANOVA table) suggesting that there is no good reason to keep the interaction term in the model.
+
+Some researchers worry that AIC does not provide a sufficient amount of penalty for estimating additional parameters, especially for moderate-large data sets. So one alternative is called BIC (\emph{Bayesian Information Criterion}) which penalizes adding in additional parameters as a function of sample size.
+
+<<>>=
+print(BIC(model_1, model_2, model_3, model_4), digits=4)
+@
+
+Which (in this case) basically tells us the same thing, BUT as we can see the $\Delta{BIC}$ is greater between the models with (model\_4) and without (model\_3) the interaction term.
+
+\pagebreak
+\section*{The kitchen sink}
+Until now, we have ignored mutation rate (which was the main response variable that we were examining for the first few tutorials). It is time to take a second look at it. We can start by visually re-examining the relationship between \texttt{FinalDiversityIndex} \& \texttt{HostMutationRate}:
+
+\begin{figure}
+\begin{center}
+<<fig=T, echo=F, label=DiversityMutation>>=
+plot(FinalDiversityIndex~HostMutationRate, data=parasite.data,
+  col=densCols(c(FinalDiversityIndex,HostMutationRate)))
+with(parasite.data, lines(smooth.spline(x=HostMutationRate, y=FinalDiversityIndex, cv=F),
+  lwd=3))
+@
+\end{center}
+\caption{Relationship between Diversity and mutation rate}
+\end{figure}
+
+This figure suggests there is not much of a relationship. Of course we know from our previous analysis that there may be an influence on particular subsets of the data. However, we have to be careful to avoid data dredging. Since this is the first hypothesis we started with we are in ok shape to return there at the moment (i.e. we have not gone snooping for a signal). There are a couple of useful ways of plotting this data.
+
+\begin{figure}
+\begin{center}
+<<fig=T, echo=F, label=DiversityMutation2>>=
+with(parasite.data, plot(FinalDiversityIndex~HostMutationRate, 
+  col=c("blue", "red")[Parasites], pch=c(16,17)[Sex]))
+with(parasite.data[parasite.data$Parasites=="Parasites" & parasite.data$Sex=="Sex",], 
+  lines(smooth.spline(x=HostMutationRate, y=FinalDiversityIndex, cv=F),
+    lwd=3, col="red", lty=1))
+with(parasite.data[parasite.data$Parasites=="NoParasites" & parasite.data$Sex=="Sex",], 
+  lines(smooth.spline(x=HostMutationRate, y=FinalDiversityIndex, cv=F),
+    lwd=3, col="blue", lty=1)) 
+with(parasite.data[parasite.data$Parasites=="Parasites" & parasite.data$Sex=="NoSex",], 
+  lines(smooth.spline(x=HostMutationRate, y=FinalDiversityIndex, cv=F),
+    lwd=3, col="red", lty=3))
+with(parasite.data[parasite.data$Parasites=="NoParasites" & parasite.data$Sex=="NoSex",], 
+  lines(smooth.spline(x=HostMutationRate, y=FinalDiversityIndex, cv=F),
+    lwd=3, col="blue", lty=3))
+legend(x=0.15, y=5.45, 
+  legend=c("Parasites-Sex", "NoParasites-Sex", "Parasites-NoSex", "NoParasites-NoSex"),
+  col=c("red", "blue", "red", "blue"),
+  lty=c(1,1,3,3), bty="n", lwd=3)        
+@
+\end{center}
+\caption{Relationship between Diversity and mutation rate based on Parasites and Sex}
+\end{figure}
+
+This clearly paints a very different picture! Clearly \texttt{HostMutationRate} plays a role, that varies according to whether individuals in the population are allowed to recombine. Not only is this consistent with what we observed in the earlier tutorial, but it suggests that we should consider some form of interaction like \texttt{HostMutationRate:Sex}. The visualization also perhaps weakly suggests that \texttt{HostMutationRate:Parasites} interaction could be considered (since the downward solid lines might have slightly different slopes), although I am somewhat more worried that this pattern is spurious, and I am ``seeing'' patterns that are not real. Of course there is no way to know for certain with this data set, so we could fit the terms, and then generate new data to see if the pattern holds. 
+
+
+<<>>=
+parasite.data$HostMutationRate_centered <- scale(parasite.data$HostMutationRate, 
+  center=T, scale=F)
+model_5 <- lm(FinalDiversityIndex ~ Parasites + 
+  Sex*HostMutationRate_centered, data=parasite.data)
+
+summary(model_5)
+confint(model_5)
+@ 
+
+How about the other possible interaction? Let us look at it (we will use ANOVA, AIC and BIC). I also want to point out that I am using another shorthand for specifying the model (it is very useful when there are large numbers of interaction terms). In a formula in \textbf{R} if you specify:\\
+
+\texttt{y \~{} (a + b + c)\^{}2}, this expands to\\
+\texttt{y \~{} (a + b + c + a:b + a:c + b:c)}\\
+
+In other words all interactions up to second order.
+
+This model:\\
+\texttt{y \~{} (a + b + c)\^{}3}, would expand to include first, second and third order interaction terms.\\
+\texttt{y \~{} (a + b + c + a:b + a:c + b:c + a:b:c)}\\
+
+Sometimes we want to include almost all of the second order terms, but maybe there is (like in our case here) one we are not interested in. Let's say we want to exclude \texttt{b:c} but want to have the other two. We literally just subtract it in the model (it is not calculated and subtracted, this has to do with the way the \texttt{formula} class in \textbf{R} works). So,\\
+\texttt{y \~{} ((a + b + c)\^{}2 - b:c)} is equivalent to\\
+\texttt{y \~{} (a + b + c + a:b + a:c)}\\
+
+
+<<>>=
+model_6 <- lm(FinalDiversityIndex ~ 
+  (Parasites + Sex + HostMutationRate_centered)^2 - Parasites:Sex, 
+  data=parasite.data)   
+  
+anova(model_3, model_5, model_6)
+
+print(AIC(model_1, model_2, model_3, model_4, model_5, model_6), 
+  digits=4)
+  
+print(BIC(model_1, model_2, model_3, model_4, model_5, model_6), 
+  digits=4)
+@
+
+Well, the comparison of the models using the traditional ANOVA (which can only be used to compare structurally nested models) suggests that the \texttt{HostMutationRate:Parasites} term in model\_6 is unnecessary. AIC actually suggests that model\_6 is the best fitting of the set of models we are comparing, although the $\Delta{AIC}=0.7$ between model\_6 \& model\_5 suggests they are pretty much equivalent models. BIC gives us a somewhat intermediate picture with a $\Delta{BIC}=3.2$, but model\_5 is the best fitting of the set of models we examined. 
+
+What we are dealing with here is the issue of \emph{model uncertainty}. Just like we have uncertainty associated with the numerical estimates for parameters in the model (where we use to standard errors and confidence intervals to quantify this uncertainty), we also can have uncertainty associated with which structural form of the model we should use. This is a much bigger topic, and we can not go into the details here. However, for the sake of simplicity of this tutorial (and arguably for the principle of parsimony) I am going to ``choose'' model\_5. This effectively means that I am constraining the parameter associated with the \texttt{Parasites:HostMutationRate} to be zero (since I am excluding it). However, all other things being equal, I would probably keep it in the model, but it would depend on my ultimate goals (i.e. prediction VS hypothesis testing).
+
+One interesting observation is that the co-efficient of determination $R^2$ for model\_5 is really not that different from model\_3 which does not include \texttt{HostMutationRate}. Based on your assignments, this is perhaps not to surprising as  \texttt{HostMutationRate} never could account for much of the variation in diversity, yet the effect size for the interaction of \texttt{HostMutationRate:Sex} is seemingly so large (although you need to account for the range of variation for mutation rate in considering this). One very useful set of plots are so called ``added-variable'' plots, which are sometimes also called "partial-regression" plots. We are using the \texttt{avPlots()} function in \texttt{car}.
+
+\begin{figure}
+\begin{center}
+<<fig=T, echo=T, lab=avPlot>>=
+avPlots(model_5)
+@
+\end{center}
+\caption{added variable (partial-regression) plots for model\_5}
+\end{figure}
+
+A fitted VS. observed plot would also be useful at this point.
+\begin{figure}
+\begin{center}
+<<fig=T, echo=T, lab=FitObMod5t>>=
+plot(parasite.data$FinalDiversityIndex ~ fitted(model_5), 
+  xlim=c(0,5), ylim=c(0,5), pch=16, col=densCols(fitted(model_5)),
+  xlab = "fitted values", ylab="observed values",
+  main = "fitted VS. observed model_5")
+ abline(a=0, b=1, lwd=2) 
+@
+\end{center}
+\caption{fittet VS. observed values for model\_5}
+\end{figure}
+
+
+\begin{thebibliography}{9}
+\bibitem{Nakagawa:2007di}
+Nakagawa, Shinichi and Cuthill, Innes C. 2007.
+Effect size, confidence interval and statistical significance: a practical guide for biologists.
+\emph{Biological reviews of the Cambridge Philosophical Society},
+ 82(4):591-605
+
+\end{thebibliography}
+
+\end{document}

@@ -1,0 +1,238 @@
+\documentclass[a4paper]{article}
+\title{CSE845 -  The influence of Parasites, Sex and Mutation Rate on FinalRichness in avidians} 
+\author{Ian Dworkin}
+\begin{document} 
+\maketitle
+\date
+
+\section{Setting up options in R}
+I don't like messy printing, so by default I like to turn off the stars next to p-values, and keep the number of significant digits to 3 (for printing not calculations). Using the \texttt{options()} function allows me to set these globally for the \textbf{R} session.
+
+<<>>=
+options(show.signif.stars=F)
+options(digits=3)
+@
+
+\section{Inputting and setting up the data}
+<<>>=
+require(car)
+require(sciplot)
+require(arm)
+@
+
+Now we make sure that the predictors we want to treat as unordered factors are in fact treated as such in \textbf{R}. We also center \texttt{HostMutationRate} given what we have observed in the previous tutorials.
+
+<<>>=
+parasite.data <- read.csv('http://beaconcourse.pbworks.com/f/sexAsex.csv', h=T)
+parasite.data$Sex <- factor(parasite.data$Sex, 
+  levels=c(0,1), labels=c("NoSex", "Sex"))
+parasite.data$Parasites <- factor(parasite.data$Parasites, 
+  levels=c(0,1), labels=c("NoParasites", "Parasites"))   
+parasite.data$HostMutationRateC <- scale(parasite.data$HostMutationRate, 
+  center=T, scale=F)
+@
+
+Q1. Which predictors need to be treated as \emph{categorical factors} and which can be treated as numeric?\\
+\\
+Both \texttt{Parasites} \& \texttt{Sex} should be treated as categorical factors (since they do not have any natural ordering). \texttt{HostMutationRate} should be treated as a quantitative predictor.
+
+Q2. Should any predictors be \emph{centered} or \emph{standardized}? Why?\\
+\\
+I have centered \texttt{HostMutationRate}, as our lowest values do not include 0, so we would have to extrapolate outside the range of the data to estimate the intercept of the model. I have not centered the categorical variables, but if the interactions need to be included, there may be co-linearity between the main and interaction effects.
+
+\section{Exploratory Plots}
+
+While I will not pull all of the important exploratory plots here (histograms/density plots, boxplots of observations related to predictors), you should examine them, as discussed in previous tutorials. However, there are a few important ones that I do reproduce here, as they help us to clearly establish the structure of the models we want to test (based on our hypotheses).
+
+First we look at how our responses \texttt{FinalRichness} varies according to both factors, \texttt{Parasites} and \texttt{Sex}.
+
+\begin{center}
+<<fig=T, echo=F>>=
+lineplot.CI(x.factor=Parasites, response = FinalRichness,
+  group=Sex, data = parasite.data, lwd=3,
+  ylab = "Richness", xlab = "Parasites",
+  x.leg = 1, y.leg = 35, 
+  ci.fun= function(x) c(mean(x)- 2*se(x), mean(x)+ 2*se(x)))
+@
+\end{center}
+
+The slopes are similar, but perhaps an interaction is worth fitting in this model?
+
+Now we examine the relationship between our response, \texttt{FinalRIchness}, and the continuous predictor \texttt{HostMutationRate} for our model. We will need to (in addition to looking out for outliers) determine whether a linear term is sufficient, or whether we need to consider some higher order polynomial. Given that we observed that the associations between \texttt{HostMutationRate} and \texttt{FinalDiversity} depending on the particular treatment levels of \texttt{Sex} and \texttt{Parasites}, we will visually examine these (with smoothed cubic splines) across the subsets. I have suppressed the \textbf{R} commands for this figure, but they are available in the corresponding R file (and is essentially the same as with our previous exercises).
+
+\begin{center}
+<<fig=T, echo=F>>=
+with(parasite.data, plot(FinalRichness~HostMutationRateC, 
+  col=c("blue", "red")[Parasites], pch=c(16,17)[Sex]))
+  
+with(parasite.data[parasite.data$Parasites=="Parasites" & parasite.data$Sex=="Sex",], 
+  lines(smooth.spline(x=HostMutationRateC, y=FinalRichness, cv=F),
+    lwd=3, col="red", lty=1))
+    
+with(parasite.data[parasite.data$Parasites=="NoParasites" & parasite.data$Sex=="Sex",], lines(smooth.spline(x=HostMutationRateC, 
+    y=FinalRichness, cv=F),lwd=3, col="blue", lty=1)) 
+    
+with(parasite.data[parasite.data$Parasites=="Parasites" 
+  & parasite.data$Sex=="NoSex",], 
+lines(smooth.spline(x=HostMutationRateC, 
+    y=FinalRichness, cv=F),
+    lwd=3, col="red", lty=3))
+    
+with(parasite.data[parasite.data$Parasites=="NoParasites" 
+  & parasite.data$Sex=="NoSex",], 
+lines(smooth.spline(x=HostMutationRateC, 
+    y=FinalRichness, cv=F),
+    lwd=3, col="blue", lty=3))
+    
+legend(x=-0.3, y=90, 
+  legend=c("Parasites-Sex", "NoParasites-Sex", 
+  "Parasites-NoSex", "NoParasites-NoSex"),
+  col=c("red", "blue", "red", "blue"),
+  lty=c(1,1,3,3), bty="n", lwd=3)        
+@
+\end{center}
+
+Clearly an interaction between mutation rate and Sex, although the effects of mutation rate do not seem to capture much of the variation.
+
+Q3. Do your exploratory plots provide you any insight into the \emph{structure} of the model you should fit? Please elaborate (i.e. Are you fitting interaction terms? Polynomials?)
+
+There is definitely evidence to suggest including interaction terms between \texttt{Sex} and \texttt{Parasites}, and maybe also interactions between these and \texttt{HostMutationRate}. However, I do not think a quadratic term for the \texttt{HostMutationRate} is necessary, although an argument could be made. I also decided not to fit the third order term, largely because it is difficult to interpret.
+
+\section{Linear Model}
+<<>>=
+model_1 <- lm(FinalRichness ~ (HostMutationRateC + Parasites + Sex)^2 , 
+  data=parasite.data)
+summary(model_1)$coef[,1:3] # hide p-values
+
+confint(model_1)
+@
+I chose not to do any model comparisons as I was interested in the influence of all of the factors, and to some extent their interactions. Instead I am focusing on the overall fit of the model and the interpretation of the model parameters.
+
+Evidence is consistent with ``significant'' influences of the all of the variables and their second order interactions. The interactions are on the same order of effect as the main terms. While the influence of \texttt{HostMutationRate} is somewhat smaller (consider the range of values it can take, with a range of 0.8), it still seems substantial. We will come back to examining the effect sizes in a bit. $R^2$ is pretty substantial as well ($\sim 0.66$). I am also surprised by the fact that the estimated co-efficients are all of the same approximate order of magnitude. Since I am not planning on comparing these results to other studies, I am not sure I need to use a standardized measure of effect size, but it is always wise to include your standard deviation for the response so other researchers can compute standardized statistics if necessary.
+
+\section{Co-linearity}
+Given that we are fitting \emph{interaction terms} there is always the possibility of co-linearity
+<<>>=
+vif(model_1)
+#print(cov2cor(vcov(model_1)) , digits=2)
+# Run but do not print in document, too big and messy
+@
+We can also look at the condition number ($\kappa$) (as an overall measure of multi--colinearity). In the earlier R scripts I provided a function for this, but I just re-wrote the important parts down below.
+<<>>=
+mod.X <- model.matrix(model_1)
+eigen.x <- eigen(t(mod.X) %*%mod.X)
+eigen.x$val # eigenvalues from the design matrix
+sqrt(max(eigen.x$val)/min(eigen.x$val))
+  # condition numbers
+@
+Our 'rule of thumb' is that condition numbers less than 30 are not to worrisome.
+
+Finally we can look at the confidence ellipses in parameter space. If they show a strong diagonal relationship (correlation among parameter estimates), this also points to some degree of co-linearity. If there is co-linearity (as diagnosed using VIF or $\kappa$), the confidence ellipses may help diagnose exactly what parameters are being affected.
+
+\begin{center}
+<<fig=T, echo=F>>=
+par(mfrow=c(2,2))
+confidenceEllipse(model_1, which.coef=c(3,5))
+confidenceEllipse(model_1, which.coef=c(3,7))
+confidenceEllipse(model_1, which.coef=c(4,7))
+confidenceEllipse(model_1, which.coef=c(4,6))
+@
+\end{center}
+There is some co-linearity between the categorical predictors and their interactions. We can use the "centering" approach advocated in your readings, or use orthogonal contrasts in the linear models (but we have not learned these yet). Also $\kappa$ and VIF suggest it is not so bad, so we will just stick with our current approach.
+
+\section{Model Fit}
+The co-efficient of determination $R^2$ suggests that we are accounting for a substantial proportion of the variation, but it is useful to visualize this.
+\begin{center}
+<<fig=T, echo=F>>=
+plot(parasite.data$FinalRichness ~ fitted(model_1), 
+  xlim=c(min(parasite.data$FinalRichness), max(parasite.data$FinalRichness)),
+  ylim=c(min(parasite.data$FinalRichness), max(parasite.data$FinalRichness)),
+  ylab= "observed FinalRichness",
+  col=densCols(fitted(model_1)))
+abline(a=0, b=1,lty=3)  
+@
+\end{center}
+
+Which suggests a reasonably decent fit.
+
+We can assess how important each variable might be (adjusted for all other predictors in the model) using \emph{added--variable plots}.
+\begin{center}
+<<fig=T, echo=F>>=
+avPlots(model_1)
+@
+\end{center}
+The added value plots (sometimes called partial plots) tell us the influence of each predictor variable on the response, once we have accounted for all other predictors (|others). It is just a graphical representation of the individual partial regression coefficients. These plots tell me that while the main effect of \texttt{HostMutationRate} is not huge, its interaction effects are substantial, and in opposing directions. No single predictor is overwhelming in its effect which suggests that are fit really is due to a combination of factors (considering the small number of parameters being estimated relative to the sample size.). 
+
+We can also use plots of the parameter estimates and their confidence intervals to help visualize this. It would be of some potential use to standardize the \texttt{HostMutationRate} to help compare it to the factors. I have not done that here, but it is a worthwhile idea to aid in interpretation.
+
+\begin{center}
+<<fig=T, echo=F>>=
+coefplot(model_1, int=T, h.axis=T, vertical=F, var.las=2, 
+  mar= c(10,3,5.1,2), main= "estimated parameters")
+@
+\end{center}
+
+To look at the effect sizes, we can perhaps just use the standard deviation of the ``control group''. However, I think the avPlots actually give me a pretty good idea of the influence and explanatory power.
+
+<<>>=
+Richness_control <- subset(parasite.data, 
+  subset=Sex=="NoSex" & 
+  Parasites=="NoParasites" & HostMutationRate==0.1)
+  
+sd(Richness_control$FinalRichness)
+coef(model_1)/sd(Richness_control$FinalRichness)
+@
+
+\section{Evaluating model assumptions}
+Have we heavily violated any assumptions of the model?
+\begin{center}
+<<fig=T, echo=F>>=
+par(mfrow=c(2,2))
+plot(model_1)
+@
+\end{center}
+
+Maybe some heterodasticity, I also might want to take care with the outlier (and run the model with and without the potential outlier). We can look at the first issue slightly differently than the Q-Q plot by plotting a histogram or kernel density estimator of the residuals.
+\begin{center}
+<<fig=T, echo=F>>=
+par(mfrow=c(1,1))
+hist(resid(model_1))
+@
+\end{center}
+
+ Which might also suggest removing the data point (which I leave as an exercise for you) to confirm that it does not substantially alter any estimates or conclusions. 
+ 
+ It is probably also worth examining the residuals with respect to the observed values for the predictors, and for the response. For clarity I have ``hidden'' the \textbf{R} code, but if you open the \texttt{.R} file associated with this tutorial you will be able to see and run the code.
+ 
+ \begin{center}
+<<fig=T, echo=F>>=
+par(mfrow=c(2,2))
+
+plot(model_1$resid ~ model_1$model$HostMutationRateC,
+     xlab = "HostMutationRate (centered)",
+     ylab = " residuals")
+ 
+lines(smooth.spline(x=model_1$model$HostMutationRateC, y=model_1$resid, 
+    cv=F), lwd=3, col="red", lty=1)
+
+plot(model_1$resid ~ model_1$model$Sex,
+    xlab = "Sex", ylab = "residuals")  
+
+plot(model_1$resid ~ model_1$model$Parasites,
+    xlab = "Parasites",  ylab = "residuals")
+    
+@
+\end{center}
+
+Which visually does not suggest terrible heterogeneity (across treatments) in the residual variation, but there is something .This could be examined more explicitly using a Levene's test. For now let us just look at the standard deviation of the residuals for each group.
+
+<<>>=
+sd(model_1$resid[model_1$model$Sex=="Sex"])
+sd(model_1$resid[model_1$model$Sex=="NoSex"])
+
+sd(model_1$resid[model_1$model$Parasites=="Parasites"])
+sd(model_1$resid[model_1$model$Parasites=="NoParasites"])
+@
+
+The relatively high sd among the residuals for \texttt{Sex} and \texttt{Parasites} may be important, and we could use a Levene's test  to clarify this more explicitly. In ZOL851, we will learn how to model residual variances that differ among groups.
+\end{document}

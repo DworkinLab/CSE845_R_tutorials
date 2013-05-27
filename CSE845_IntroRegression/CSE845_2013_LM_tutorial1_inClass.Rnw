@@ -1,0 +1,270 @@
+\documentclass[a4paper]{article}
+\title{CSE891 - an example regression analysis} 
+\author{Ian Dworkin}
+\begin{document} 
+\maketitle
+\date
+
+<<echo=F>>=
+options(show.signif.stars=F)
+options(digits=3)
+source('http://beaconcourse.pbworks.com/w/file/fetch/36678466/Source_useful_R_function_ID_Feb24_2011.R')
+@
+
+\section*{Introduction, reading in \& subsetting the data}
+So far we have discussed linear modeling in a somewhat abstract way. Now we are going to put together some of the tools using \textbf{R} for fitting linear models.\newline
+
+We are going to work with a dataset (well a subset of the dataset) that looks at phenotypic diversity (number of tasks performed) as a function of a number of predictor variables, including the presence \& absence of parasites, sex and varying mutation rate. This data was generated using Avida, a digital life platform that is very useful for addressing questions in evolutionary biology. This data represents the endpoints of Avida runs after 100,000 updates.\
+
+For today we are just going to examine a subset of the data, as described below.
+
+First we will read in the data
+
+<<>>=
+parasite_data <- read.csv("http://beaconcourse.pbworks.com/w/file/fetch/37890621/sexAsex.csv", h=T)
+@
+
+Notice that we read the data in directly from the website. This is very useful.
+
+We start by taking a quick look at the data (I will allow you to check that the data read in correctly).
+
+<<>>=
+str(parasite_data)
+@
+
+We only want to grab a subset of the data (with no sex and no parasites).
+
+<<>>=
+no_parasites_no_sex <- subset(parasite_data, Parasites==0 & Sex==0)
+
+str(no_parasites_no_sex)
+
+summary(no_parasites_no_sex)
+@
+\pagebreak
+\section*{Visual examination of the relationship between variables}
+We want to ask about the relationship between final (phenotypic) diversity (\texttt{FinalDiversityIndex}) and mutation rate (\texttt{HostMutationRate}). Specifically we want to address the questions 'Does mutation rate influence the diversity of tasks performed in the population"? We can rephrase this into the hypothesis that an increase in mutation rate should provide additional opportunities for the organisms to diversify the tasks they perform, and that tasks are mutation limited.
+
+We will start with some basic plots:
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+
+par(mfrow=c(2,1))
+plot(FinalDiversityIndex ~ factor(HostMutationRate), 
+  data=no_parasites_no_sex, 
+  main="Relationship between diversity and mutation rate",
+  xlab = "HostMutationRate" )
+
+plot(FinalDiversityIndex ~ HostMutationRate, 
+  data=no_parasites_no_sex, 
+  main="Relationship between diversity and mutation rate")
+  
+lines(smooth.spline(y=no_parasites_no_sex$FinalDiversityIndex,
+  x=no_parasites_no_sex$HostMutationRate), col="red", lwd=2)
+
+lines(lowess(y=no_parasites_no_sex$FinalDiversityIndex,
+  x= no_parasites_no_sex$HostMutationRate), col="blue", lwd=2)
+@
+\end{center}
+
+The red and blue lines represent  two different non-parametric smoothers (loess/lowess \& cubic spline). What we care about is that they provide a useful assessment of how linear or non-linear the relationship between diversity and mutation rate might be, without requiring us to fit a specific model. Consistent with our hypothesis, there seems to be some form of weak relationship, and it is clear that there is some non-linearity between diversity and mutation rate. For the moment we will ignore it, and we will return to it at the end of this tutorial.
+
+\section*{The linear regression}
+
+Now we want to actually model the influence of \texttt{HostMutationRate} (our `predictor') on \texttt{FinalDiversityIndex} (our `response'). In statistical jargon we say that we are regressing \texttt{FinalDiversityIndex} onto \texttt{HostMutationRate} (regressing our `y' onto our `x').  
+
+To perform this regression in \textbf{R} we use the \texttt{lm()} function. lm stands for \textbf{L}inear \textbf{M}odel. As we will learn linear regression is just a special case of the \emph{general linear model} in statistics. For the moment we will ignore the apparent non-linearity, and just model it as a linear relationship.
+
+In \textbf{R} we regress y onto x like:
+
+\texttt{lm(y $\sim$ x, data=YourData)}, where the tilde (`$\sim$') means `is modeled as'. So you would read this as ``y is modeled as a function of x''. Using the \texttt{lm()} additionally implies that we are assuming that the residual (unexplained) variation in the model is normally distributed, and that the response is (to a first approximation) a continuous variable. So we are really fitting the model.\\
+\\
+$ y = f(x)  \sim N(\beta_{0} + \beta_{1}x, \sigma_{rse})$, where\newline
+\newline
+$N()$ means normally distributed with mean ($\mu$) equal to $\beta_{0} + \beta_{1}x$\\
+$\beta_{0}$ is the intercept\\
+$\beta_{1}$ is the slope of the regression line\\
+$\sigma_{rse}$ is the residual standard error of the model. The variation remaining in our response ($y$) after accounting for the model. Here I have it in the same units as $y$, but you will often see it expressed as a variance  $\sigma^2$, and being labeled the unexplained variance of the model. 
+
+Using the \texttt{lm()} in  \textbf{R} assumes that you want to fit an intercept term in your model (which we almost want to do). So we did not need to explicitly include it in the function call to \texttt{lm()}. However, we certainly can (and it is probably a good idea when you are first starting out). In any case it means that these two calls are equivalent:\\
+\\
+\texttt{lm(y $\sim$ 1 + x)} means the same as\\
+\texttt{lm(y $\sim$  x)} \\
+\\
+Now we actually fit the model in \textbf{R}
+
+<<>>=
+model_1 <- lm(FinalDiversityIndex ~ HostMutationRate, 
+  data=no_parasites_no_sex)
+
+summary(model_1)
+@
+
+Looking at the coefficients this tells us that our estimated fit for the model is:\\
+$ y = \hat{\beta_{0}} + \hat{\beta_{1}}x  = 0.98 + 0.64x$\\
+\\
+We now need to \emph{evaluate the fit} of the model (model criticism), and checking the \emph{assumptions of the model}. These are different goals, and we use different plots (and numbers to look at) to consider them.
+
+In the summary table there are a couple of very useful things to examine, including the estimates themselves, standard errors and t statistics associated with the estimates. There are of course also the p values which are worth examining, but take care to place them in the context of the model (just because you have a small p value for an estimate does not mean it is biologically important). I prefer to examine the estimates and their standard errors to begin to make sense of how important the predictor is. Confidence intervals (either approximated by two times the standard error or generalized confidence intervals) are essential for this.
+ 
+<<>>=
+confint(model_1)
+@
+
+We are less interested (in this case) in what the intercept is telling us, and more interested in the slope of the relationship between \texttt{FinalDiversityIndex} and \texttt{HostMutationRate}. So focus on what the confidence intervals are telling us about the slope of the relationship (clearly positive, but small). For each unit increase in mutation rate (which is a scaled mutation rate), we see a $\sim$0.6 increase in host diversity. However the confidence intervals suggest that it could be (keeping in mind what the 95\% confidence intervals mean) as low as 0.087 or as high as 1.2 for each unit increase in mutation rate.
+
+We can start to visualize this by plotting the observed data for \texttt{FinalDiversityIndex} and \texttt{HostMutationRate}, and then adding the fitted line. We can do this easily in \textbf{R} by using the \texttt{abline()}, which is for fitting lines (with a = intercept,  b = slope). The \texttt{abline()} can also take a model object outputted from a call to \texttt{lm()}, which is really convenient.
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+par(mfrow=c(1,1))
+plot(FinalDiversityIndex ~ HostMutationRate, 
+  data=no_parasites_no_sex, pch=16)
+abline(model_1, lwd=3, col="purple")
+@
+\end{center}
+
+Which alone suggests that we are not really capturing much of the variation in \texttt{FinalDiversityIndex}.\\
+
+It helps if we can add the confidence intervals directly onto the plot as well. Since both the intercept and the slope are estimated, they both have confidence intervals. This makes this a little bit more tricky, and I do not want to delve into the details here, but it is readily accomplished in \textbf{R}. The code may not make much sense at the moment (which is ok), but in ZOL851 it will be explained more fully.
+
+First we are going to generate values of \texttt{HostMutationRate} to predict on. These can be the observed values, but need not to be. We will will store these new values in a data frame (In this example called \texttt{new.dat}). Then we will predict values of the \texttt{FinalDiversityIndex}   response, based on the fitted model. The argument \texttt{interval=`confidence'} says we want confidence intervals on the fitted values (defaulting to the 95\% CI). This gets stored in \texttt{pred.data}.
+
+<<>>=
+new.dat <- data.frame(HostMutationRate= seq(from=0, to=1 , by=0.01))
+pred.data <- predict(model_1, new.dat, interval="confidence")
+@
+
+Now we will plot the observed values for diversity and mutation rate as above, but add lines for fitted and upper and lower \emph{confidence bands}.
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+par(mfrow=c(1,1))
+plot(FinalDiversityIndex ~ HostMutationRate, 
+  data=no_parasites_no_sex, pch=16)
+lines(x=new.dat[,1], y=pred.data[,1], col="purple", lwd=4)
+lines(x=new.dat[,1], y=pred.data[,2], col="purple", lwd=4, lty=2)
+lines(x=new.dat[,1], y=pred.data[,3], col="purple", lwd=4, lty=2)
+@
+\end{center}
+
+While we have captured some of the upper ward trend, it is very clear that there is a considerable amount of variation for diversity that we can not account for with \texttt{HostMutationRate} by itself.
+\subsection*{ Coefficient of Determination}
+
+The coefficient of determination \(R^2\) is useful to assess how much variation in the observed response is \emph{accounted for} by the model. We get this information from the call to \texttt{summary(model\_1)} above. As we see we only account for around 5\% of the variation in diversity with host mutation rate. This can be captured visually in a plot of fitted values for the response (the values the model predicts for \texttt{FinalDiversityIndex}) vs. the observed value for \texttt{FinalDiversityIndex}. In other words a plot of $\hat{y}$ vs \(y\). In addition to the scatterplot of observed vs. fitted, we also plot a 1:1 line for comparison. If the model perfectly accounts for the observed variation in \texttt{FinalDiversityIndex}, then all of the points should lie along this 1:1 line.
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+plot(y =no_parasites_no_sex$FinalDiversityIndex, 
+  x= fitted(model_1), xlim=c(0,5), ylim=c(0,5),
+  ylab = "observed values of response",
+  xlab = expression(paste("fitted values of response, ", hat(y))))
+abline(a=0, b=1)
+@
+\end{center}
+
+Consistent with the value of  \(R^2\), the model we fit is not doing a great job of accounting for the variation in the observed data for diversity. If it was most points would be on, or close to the line of one to one correspondence.
+
+\pagebreak
+\subsection*{Simple model diagnostics}
+There are also some important diagnostic plots that we can examine as well. For instance it is good to examine the residuals of the model and see if they conform to the assumption of normality (and mean ~ 0):
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+hist(resid(model_1))
+@
+\end{center}
+
+Here we see that the residuals have a mean close to zero, and that while the distribution of residuals is not exactly symmetric, it is not too bad, and certainly non extremely worrisome.
+
+Some other diagnostics can be useful (which we have not yet discussed in class) can actually be viewed simply by using \texttt{plot(modelObject)}, like this.
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+par(mfrow=c(2,2))
+plot(model_1)
+par(mfrow=c(1,1))
+@
+\end{center}
+
+I would suggest reading the relevant sections in both Gotelli and Ellison and in the Dalgaard book for more details on the diagnostics, but briefly\...\\
+The top left  panel (residuals vs. fitted values) can be very useful to help determine whether there are some non-linearities in the relationship (since we have only modeled the linear relationship these will come out in the residuals as a parabola). We see some weak evidence of that here.  This can also be useful to detect if the residual variance is homogenous across all of the data (which is an assumption of the linear model). \\
+\\
+The top right panel (normal Q-Q), shows the theoretical vs. observed  scatterplot for the residuals. If they are along the one to one line it suggests that the residuals are mostly normally distributed without any heterogeneity in the residual (unaccounted for variation).\\
+\\
+The Bottom right (Residuals vs. Leverage) is useful for detecting whether any observations are having an undue influence on the fit of the model. More on this in the readings (with some useful figures).
+
+\pagebreak
+\section*{Regression model with both a linear and quadratic term as predictors}
+
+If you go up to the very first plot it is clear that \texttt{FinalDiversityIndex} is saturating or possible even decreasing at high values of \texttt{HostMutationRate}.  This may lead us to think that we should model this non-linear relationship, which is very straight forward to do, simply by adding a \emph{quadratic} term to the model.  Now it may seem strange that that we are fitting a non-linear relationship using a so-called linear model, but in statistics the term linear model has a specific meaning; the model is linear with respect to the parameters in the model.\\
+\\
+So,\\
+\\
+$ y \sim \beta_{0}1 + \beta_{1}x + \beta_{2}x^2$ is a legit linear model, as all of the $\beta$ terms enter the model linearly. In this particular case where we are simply adding a $x^2$ term, this is an example of a \emph{basis expansion} in mathematics. 
+
+<<>>=
+model_2 <- lm(FinalDiversityIndex ~ 1 + HostMutationRate + I(HostMutationRate^2), 
+  data=no_parasites_no_sex)
+summary(model_2)  
+@
+
+The evidence suggests that the quadratic term is probably worth keeping in the model. In addition to the `significance' of the coefficient associated with the quadratic term, we can now account for $\sim$11\% of the variation observed in \texttt{HostMutationRate}. But is this really better?  We can double check by comparing the relative model fits of the model with only the linear term, vs. the model with both linear and quadratic (note there are other, better approaches to this based on \emph{information theoretic} approaches, but we will not discuss them in this class).
+
+<<>>=
+anova(model_1, model_2)
+@
+
+This suggests that the fit of the model\_2 is an improvement over model\_1.  In this case it is based on the reduction in RSS (residual sum of squares) for the model with the quadratic as compared to the model with the linear term only.  This really is giving us the same information though as the p-value associated with the quadratic term from the summary or from:
+
+<<>>=
+anova(model_2)
+@
+
+It is worth noting that model selection based on RSS or $R^2$ is sub-optimal in many situations, and we will learn in ZOL851 about other approaches that are more generally useful such as \emph{Akaike's information criterion}, or AIC. I will not go through the details at the moment now (but it is discussed a bit in your readings), but you can use AIC simply by:
+
+<<>>=
+AIC(model_1)
+AIC(model_2)
+@
+
+Where lower AIC values suggest a better relative fit, but we will discuss this more in ZOL851.
+ 
+We can look more directly at the fit of the model itself.
+
+<<>>=
+new.dat.1 <- data.frame(HostMutationRate= seq(from=0, to=1 , by=0.01))
+pred.data.1 <- predict(model_2, new.dat, interval="confidence")
+@
+
+
+As before, we will plot the observed values for diversity and mutation rate as above, but add lines for fitted and upper and lower \emph{confidence bands}.
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+par(mfrow=c(1,1))
+plot(FinalDiversityIndex ~ HostMutationRate, 
+  data=no_parasites_no_sex, pch=16)
+lines(x=new.dat.1[,1], y=pred.data.1[,1], col="purple", lwd=4)
+lines(x=new.dat.1[,1], y=pred.data.1[,2], col="purple", lwd=4, lty=2)
+lines(x=new.dat.1[,1], y=pred.data.1[,3], col="purple", lwd=4, lty=2)
+@
+\end{center}
+
+And a quick plot of fitted vs. observed.  Remember this is a useful (and important) way of visualizing the same information as $R^2$.
+
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+plot(y =no_parasites_no_sex$FinalDiversityIndex, 
+  x= fitted(model_2), xlim=c(0,5), ylim=c(0,5),
+  main = "Model with linear and quadratic terms",
+  ylab = "observed values of response",
+  xlab = expression(paste("fitted values of response, ", hat(y))))
+abline(a=0, b=1, lwd=2)
+@
+\end{center}
+
+So while we have improved the fit, it is clear that the \texttt{HostMutationRate} is not that an overwhelmingly important predictor of \texttt{FinalDiversityIndex}.
+
+\end{document}

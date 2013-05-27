@@ -1,0 +1,128 @@
+\documentclass[a4paper]{article}
+\title{CSE891 Two way ANOVA \& Interaction Terms - Final Richness Analysis} 
+\author{Erik Fredericks}
+\begin{document} 
+\maketitle
+\date
+
+\section*{In-Class Assignment}
+Note, unfortunately my knowledge of LaTeX is pretty minimal, and for some reason my figures have all slid off to the end of this document.  I called out what figures go where, but I couldn't figure out how to place them within my paragraph. \\ \\
+\textbf{Initial R-code}
+<<>>=
+# libraries
+require(car)
+require(sciplot)
+require(arm)
+@
+
+<<>>=
+# read in and center data as needed
+parasite.data <- read.csv('http://beaconcourse.pbworks.com/f/sexAsex.csv', h=T)
+parasite.data$Sex <- 
+  factor(parasite.data$Sex, levels=c(0,1), labels=c("NoSex", "Sex"))
+parasite.data$Parasites <- 
+  factor(parasite.data$Parasites, levels=c(0,1), labels=c("NoParasites", "Parasites"))   
+@ \\ \\
+\textbf{Which predictors need to be treated as categorical factors and which can be treated as numeric?}
+\\ \\ The Parasites and Sex variables should be treated as categorical factors, and HostMutationRate should be numeric.
+\\ \\
+\textbf{Should any predictors be centered or standardized? Why?}
+\\ \\ I would center HostMutationRate, because it is not really centered around 0, as can be seen in Figure 1 (next page).  The other two don't need to be centered, since they are categorical.
+<<>>=
+# center host mutation rate
+parasite.data$centered_HostMutationRate <- 
+  scale(parasite.data$HostMutationRate, center = T, scale = F)
+@
+\begin{figure}
+\begin{center}
+<<fig=T, echo=F, label=HostMutationRate>>=
+plot(parasite.data$HostMutationRate)
+@
+\end{center}
+\caption{Plot of HostMutationRate}
+\end{figure}
+\textbf{Do your exploratory plots provide you any insight into the structure of the model you should fit? Please elaborate (i.e. Are you fitting interaction terms? Polynomials?)}
+\\ \\ The following plot demonstrates the effects of sex and no sex between Parasites and the Final Richness.  This plot shows me that they have a similar slope, and that further investigation into interactions is warranted.
+<<>>=
+# exploratory plots
+lineplot.CI(x.factor = Parasites, response = FinalRichness,
+  group = Sex, data = parasite.data, lwd = 3,
+  ylab = "task richness", xlab = "Parasites", 
+  x.leg = 1, y.leg = 3.25,
+  ci.fun = function(x) c(mean(x) - 2 * se(x), mean(x) + 2 * se(x)))
+@
+To model the interaction terms, first I need to fit the models.
+<<>>=
+model_sp <- lm(FinalRichness ~ Sex * Parasites,
+  data = parasite.data)
+print(summary(model_sp), signif.stars = FALSE, digits = 3)
+@
+Here, the interaction term is decently large, so they will need to be considered in the fitted model.  Looking at HostMutationRate:
+<<>>=
+model_hmr <- lm(FinalRichness ~ centered_HostMutationRate,
+  data = parasite.data)
+print(summary(model_hmr), signif.stars = FALSE, digits = 3)
+@
+Again, the term here is worth considering in the model.  
+
+\begin{figure}
+\begin{center}
+<<fig=T, echo=F, label=ExploratoryPlot>>=
+lineplot.CI(x.factor = Parasites, response = FinalRichness,
+  group = Sex, data = parasite.data, lwd = 3,
+  ylab = "task richness", xlab = "Parasites", 
+  x.leg = 1, y.leg = 3.25,
+  ci.fun = function(x) c(mean(x) - 2 * se(x), mean(x) + 2 * se(x)))
+@
+\end{center}
+\caption{Exploratory Plot of Sex and No Sex}
+\end{figure}
+
+
+
+\textbf{Do you need to do any model comparisons? Or is there a single specific model that you are fitting? Please justify your answer.}
+\\ \\ Model comparisons probably are not necessary, as we're more interested in looking at the interactions of the predictors.  I'll be fitting a quadratic model, as the data appear to be decently complex and probably will cause a linear model to fail.
+<<>>==
+model_fit <- lm(FinalRichness ~ (centered_HostMutationRate +
+  Sex + Parasites) ^ 2, data = parasite.data)
+print(summary(model_fit, signif.stars = FALSE, digits = 3))
+print(confint(model_fit), digits = 3)
+@
+
+\textbf{How are you judging the relative importance of each predictor or interactions between predictors (if you had interactions)? Which predictors are important?}
+\\ \\ In looking at the fitted summary, I am able to get a feeling for how much effect each predictor is having.  Between their estimated values and their confidence intervals, I am able to tell that there is some decent interaction going on.  I believe that all three predictors are important enough to merit watching.  There also is a decently high value for R-squared.
+\\ \\
+\textbf{Does the model provide an overall good fit to the data? How are you evaluating the fit?}
+\\ \\ In order to check the model fit, I will plot it, as is seen in Figure 3.  The fitted line passes through each center of mass fairly closely.
+\begin{figure}
+\begin{center}
+<<fig=T, echo=F, label=ModelFit>>=
+plot(parasite.data$FinalRichness ~ fitted(model_fit),
+  pch = 16, col = densCols(fitted(model_fit)), 
+  xlab = "fitted values", ylab = "observed values",
+  main = "fitted vs observed - quadratic fit")
+abline(a = 0, b = 1, lwd = 2)
+@
+\end{center}
+\caption{Model - Fitted vs Observed}
+\end{figure}
+
+\textbf{Are there any assumptions to the model fitting process that may be violated? Any other issues (say between the predictors)?}
+\\ \\ Figure 4 shows the plots resulting from the model fit.  The plots actually appear quite reasonable, and it seems like the quadratic fit is fairly decent.  There is an outlier that may cause an issue, however the majority of the data appears to be accounted for.
+\begin{figure}
+\begin{center}
+<<fig=T, echo=F, label=FittedModel>>=
+par(mfrow=c(2,2))
+plot(model_fit)
+@
+\end{center}
+\caption{Fitted Model}
+\end{figure}
+
+\textbf{What does this model tell you about FinalRichness in this experiment?}
+\\ \\ The model tells me that Final Richness can be reasonably predicted by using a quadratic fit, although there is an outlier which may cause an issue.  I also know that the predictor variables used had a decent amount of interaction and need to be accounted for when fitting the model.  Finally, it appears that the richness of the task increases when parasites are present as opposed to not being present.
+
+
+
+
+\end{document}

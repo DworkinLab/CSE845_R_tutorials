@@ -1,0 +1,294 @@
+\documentclass[a4paper]{article}
+\title{CSE845 - dealing with co-linearity, and  co-varying parameter estimates, introduction} 
+\author{Ian Dworkin}
+\begin{document} 
+\maketitle
+\date
+
+<<echo=F>>=
+#setting options for prettier printing
+options(show.signif.stars=F)
+options(digits=3)
+@
+
+\section{Introduction}
+In class today, we will continue with the example we laid out last week, looking at \texttt{FinalDiversityIndex} as a function of \texttt{HostMutationRate}. However the \emph(goal) for today is to look more at the assumptions of the models, and in particular how to reduce the  co-variation between the parameter estimates. The co-variation between parameter estimates, can be caused by co-variance in the observed variables themselves, but as we discuss, it can be a broader issue than that. If it is not dealt with, it can lead to unstable parameter estimates, and highly inflated standard errors.  The co-varying parameter may be with respect to something as simple as how estimates for the intercept ($\hat{\beta_{0}}$) and slope ($\hat{\beta_{1}}$) in the simple linear regression model co-vary\\
+ $ y \sim N(\beta_{0} + \beta_{1}x, \sigma)$\\
+Or the co-variation in the estimates for the linear ( $\hat{\beta}_{1}$) and quadratic ($\hat{\beta}_{2}$) parameter estimates
+in the model $ y \sim \beta_{0}1 + \beta_{1}x + \beta_{2}x^2$
+
+We can also have this problem when two or more of our predictors co-vary strongly with one another.
+
+If our estimates of these parameters co-vary with each other, it (not surprisingly) makes them hard to uniquely estimate (which is our goal). This comes out not only in potentially having poorer estimates, but also in having larger standard errors, which we do not want. As I will show, simply centering of the data (subtracting the mean value from the observed explanatory variables) can often go a long way towards alleviating the problem. 
+
+This problem (of co-varying parameter estimates) arise (in our example today) from two related causes. One is from trying to estimate a parameter (the intercept) outside the range of the observed data, and the second due to \emph{co-linearity} between predictor variables, in this case because of the correlation between values of $x$ and $x^2$ (which results in these two "predictors" being far from independent of one another).
+
+We are going to use some functions in the \texttt{car} library today.
+<<>>=
+require(car)
+@
+
+If you get an error message about package not found, it means the \texttt{car} library has not been installed on your system so you may need to install it (see the intro to R tutorials), and you can try \texttt{install.packages("car")}.
+
+Read in, and subset the data
+<<>>=
+parasite.data <- read.csv('http://beaconcourse.pbworks.com/f/sexAsex.csv', h=T)
+noParasitesNoSex <- subset(parasite.data, Parasites==0 & Sex==0)
+@
+
+And as a reminder of the data (some plots and fitting the quadratic regression)
+\begin{center}
+<<fig=TRUE, echo=FALSE>>=
+par(mfrow=c(2,1))
+plot(FinalDiversityIndex ~ HostMutationRate, data=noParasitesNoSex, 
+  main="Relationship between Diversity and mutation rate")
+lines(smooth.spline(y=noParasitesNoSex$FinalDiversityIndex ,
+  x=noParasitesNoSex$HostMutationRate), col="red")
+lines(lowess(y=noParasitesNoSex$FinalDiversityIndex ,
+  x= noParasitesNoSex$HostMutationRate), col="blue")
+   
+model_2 <- lm(FinalDiversityIndex ~ HostMutationRate + I(HostMutationRate^2), 
+  data=noParasitesNoSex)
+new.dat.1 <- data.frame(HostMutationRate= seq(from=0, to=1 , by=0.01))
+pred.data.1 <- predict(model_2, new.dat.1, interval="confidence")
+
+plot(FinalDiversityIndex ~ HostMutationRate, 
+  data=noParasitesNoSex, pch=16)
+lines(x=new.dat.1[,1], y=pred.data.1[,1], col="purple", lwd=4)
+lines(x=new.dat.1[,1], y=pred.data.1[,2], col="purple", lwd=4, lty=2)
+lines(x=new.dat.1[,1], y=pred.data.1[,3], col="purple", lwd=4, lty=2)
+@
+\end{center}
+
+\section{Houston we have a problem...}
+If you remember from the last tutorial this was a better fit (by a number of criteria) than the simple linear regression. So everything is good, right? Well it turns out there are some issues. In particular our two predictors are clearly not going to be independent of each other since one ($x^2$) is just the square of the other ($x$).
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+par(mfrow=c(1,1))
+plot(jitter(noParasitesNoSex$HostMutationRate), 
+ jitter(I(noParasitesNoSex$HostMutationRate^2)),
+ xlab= "Host Mutation rate", ylab = "(Host Mutation rate)^2",
+ main = "Houston... we have a problem.." ) 
+@
+\end{center}
+
+Our two predictors (Host Mutation Rate and its square), are highly correlated. For this model to be estimated properly, we actually need our predictors to be reasonably independent (or at least not highly correlated). When predictors are highly correlated with each other the estimated parameters associated with the predictors WILL ALSO BE CORRELATED!
+
+This is perhaps best considered by plotting in parameter space (as opposed to observational space). Let us consider how the estimated values for the parameters co-vary in the model with both the linear and quadratic term. We will use the \texttt{confidenceEllipse()} from the \texttt{car} library in \textbf{R}.
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+par(mfrow=c(1,1))
+confidenceEllipse(model_2) 
+@
+\end{center}
+
+It is very useful to examine this correlation numerically, and we do so by examining the magnitude of the co-variances between the parameter estimated between the linear and quadratic terms.
+
+<<>>=
+vcov(model_2)
+@
+
+Which shows the variances for the parameter estimates. Take the \texttt{sqrt()} of the values along the diagonals to get the standard errors of the parameters. For the intercept this would be:
+
+<<>>=
+sqrt(vcov(model_2)[1,1])
+summary(model_2)$coef[1,2]
+@
+ 
+ For the parameter associated with the linear term $x$ the standard error is
+<<>>=
+sqrt(vcov(model_2)[2,2])
+summary(model_2)$coef[2,2]
+@
+ 
+While for the parameter associated with the quadratic term $x^{2}$ the standard error is
+
+<<>>=
+sqrt(vcov(model_2)[3,3])
+summary(model_2)$coef[3,2]
+@
+
+However we are mostly interested in the off-diagonals, which represent the co-variances between parameter estimates. It is sometimes hard to evaluate how strongly our parameter estimates are influenced from one another just based on raw co-variances, so instead we convert this to a correlation matrix using \texttt{cov2cor()}. 
+
+<<>>=
+cov2cor(vcov(model_2))
+@
+
+Which shows how substantially or parameter estimates are influencing one another for the linear and quadratic term. Clearly this is not great, and if possible we should identify ways to estimate these terms more independently of one another. But how?
+
+
+ But before we get too far, we will go back to the simple linear model (without the 2nd order polynomial) to help us understand the problem of co-varying parameter estimates for a somewhat simpler case (and for different reasons). We will then return to see how this problem (resulting from different causes) can also have a common solution.
+
+\section{Estimating outside of the range of the data}
+<<>>=
+model_1 <- lm(FinalDiversityIndex ~ HostMutationRate, 
+  data=noParasitesNoSex)
+@
+
+We will start by looking at the Variance Co-variance matrix of the parameter estimates.
+
+<<>>=
+vcov(model_1)
+@
+
+On the diagonal are the Standard Errors of the estimates squared (i.e. the variances of the estimates). So if you take the square root of either diagonal element, you should get the same value as the reported standard error for that coefficient.
+
+<<>>=
+sqrt(vcov(model_1)[1,1]) # se for intercept
+sqrt(vcov(model_1)[2,2]) # se for slope
+summary(model_1)$coef[ ,1:2]
+@
+
+The off diagonal represents the co-variance between the parameter estimates for the slope and intercept. Often it is easier to think about these as correlations. Remember that the diagonal is the correlation between a parameter estimate and itself so these have to equal 1.
+
+<<>>=
+cov2cor(vcov(model_1))
+@
+
+What does this mean? It means that the parameter estimates are highly (negatively) correlated with each other, and as one (say the intercept) subtlety changes (say by adding or dropping an observation) we would expect a substantial change in the other (the slope). Sometimes it is easier to visualize this. We will use the \texttt{confidenceEllipse} function in the \texttt{car} library.
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+par(mfrow=c(1,1))
+confidenceEllipse(model_1) 
+@
+\end{center}
+ 
+This plots the confidence ellipse in parameter space. As we can see if the estimate for the intercept changes slightly, so does the estimate for the slope! One important thing to keep in mind, is that the ellipse represents the 95\% confidence region in \emph{parameter space}. We are not in the \emph{observation space} (like we were in the first figure in todays tutorial).
+
+To hammer this point home, I am going to rely on a monte-carlo simulation to help clarify what I mean. We are going to simulate a linear relationship between two variables (y \& x)\\. The deterministic part of the relationship is:
+$ y = 5 + 0.7x $\\
+There is of course variation in the population so the actual distribution is
+$ y \sim N(5 + 0.7x, \sigma = 2)$\\
+
+And now we draw samples from this population
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+a=5  # intercept
+b=0.7  # slope
+x <- seq(5,25)
+y_fixed <- a + b*x
+y.sim.0 <- rnorm(length(x), mean=y_fixed, sd=4)
+lm.sim <- lm(y.sim.0 ~ x)
+
+par(mfrow=c(2,1))
+plot(y.sim.0 ~ x, xlim=c(0, 25), ylim=c(0, 25),
+ main = "relationship between y and x in observational space")
+abline(lm.sim, lwd=2, col="red")
+
+confidenceEllipse(lm.sim, 
+  main = "confidence ellipse in parameter space")
+@
+\end{center}
+
+
+Now we will do a bunch of simulations for this (like repeatedly drawing samples from this population):
+
+<<>>=
+simmie.1 <- function() {
+	y.sim.1 <- rnorm(length(x), mean=y_fixed, sd=4) 
+	 # generate a sample from the distribution
+	y.sim.1.lm <- lm(y.sim.1 ~ x) # using the new sample, re-run the model
+    coef(y.sim.1.lm)  # extract the coefficients from this new model
+  }
+
+coef.sim <- t(replicate(n=1000, simmie.1())) 
+  # repeatedly call the function n times.
+@
+
+And we plot it
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+par(mfrow=c(2,1))
+confidenceEllipse(lm.sim, 
+  main = "confidence ellipse in parameter space")
+
+plot(coef.sim[,2] ~ coef.sim[,1], pch=16, col="red",
+  xlab= " estimated intercepts from sim",
+  ylab = "estimated slopes from sim",
+  main = " simulated slopes and intercepts")
+@
+\end{center}
+
+Why are we getting this correlation between the intercept and the slope? You may have noticed in the previous plot in \emph{observational space} that our $x$ values range from 5-25. However, our intercept is the estimated value of $y$ when $x=0$, which is outside the range of our observations. This degree of extrapolation causes our problems in estimating values for the intercept ($\hat{\beta_{0}}$) and also increases the standard error of its estimate.
+
+\section{Centering the data can help}
+So what can we do? In this case there is a simple solution, we \emph{center} the observed data (in this case the explanatory variable) by subtracting off the mean. Once centered we refit the model.
+
+<<>>=
+x.centered <- x - mean(x)
+lm.sim.cent <- lm(y.sim.0 ~ x.centered)
+summary(lm.sim.cent)$coef
+@
+compared to
+<<>>=
+summary(lm.sim)$coef
+@
+
+Or in a plot
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+par(mfrow=c(1,2))
+plot(y.sim.0 ~ x.centered)
+abline(lm.sim.cent, col ="red", lwd=2)
+confidenceEllipse(lm.sim.cent)
+@
+\end{center}
+
+And we can see this in the covariance matrix of the parameter estimates:
+
+<<>>=
+cov2cor(vcov(lm.sim.cent))
+@
+
+So our problem with the co-variation in the parameter estimates was fixed pretty simply. We now need to interpret the intercept slightly differently, but the slope has not changed at all (including the standard errors).
+
+\section{Back to the co-linearity issue with the polynomial}
+Now let us go back to the polynomial (quadratic) regression. We have a similar problem (the co-variance in parameter estimates), but for a different reason (correlation between $x$ \& $x^2$ leading to co-linearity). However it turns out that the same solution (centering the explanatory variable) can also help us here.
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+
+host_mutation_rate_centered <- with(noParasitesNoSex, HostMutationRate - mean(HostMutationRate))
+
+mean(host_mutation_rate_centered)
+
+plot(jitter(host_mutation_rate_centered), jitter(I(host_mutation_rate_centered^2)))
+@
+\end{center}
+
+Now we re-fit the model with the centered variable
+
+<<>>=
+model_2_centered <- lm(FinalDiversityIndex ~ host_mutation_rate_centered + 
+  I(host_mutation_rate_centered^2), data=noParasitesNoSex)
+summary(model_2)$coef
+summary(model_2_centered)$coef
+@
+
+Or compare the confidence ellipses for the model with and without centering.
+\begin{center}
+<<fig=TRUE>>=
+par(mfrow=c(1,2))
+confidenceEllipse(model_2)
+confidenceEllipse(model_2_centered)
+@
+\end{center}
+
+
+We can also compare the correlation matrices among the parameter estimates. For the un-centered data this is:
+
+<<>>=
+cov2cor(vcov(model_2))
+@
+
+While for the centered data it is:
+<<>>=
+cov2cor(vcov(model_2_centered))
+@
+
+\textbf{Remember to do your readings on model assumptions and diagnostics!!!!} It was already part of the assigned readings, but the key pages are 257-264 in Gotelli and Ellison, as well as pages 113-119 in Dalgaard.
+\end{document}

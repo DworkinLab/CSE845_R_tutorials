@@ -1,0 +1,208 @@
+\documentclass[a4paper]{article}
+\usepackage{amsmath}
+\newcommand{\R}{{\bf R}}
+\title{CSE845 - Interpreting multiple linear regression part 1} 
+\author{Ian Dworkin}
+\begin{document} 
+\maketitle
+\date
+
+
+<<echo=F>>=
+options(show.signif.stars=F)
+options(digits=3)
+@
+
+<<echo=F>>=
+require(car)
+require(arm)
+require(effects)
+require(asbio)
+require(MASS)
+@
+
+<<echo=F>>=
+# condition number for multi-colinearity
+ConditionNumber <- function(X){
+    mod.X <- model.matrix(X)
+    eigen.x <- eigen(t(mod.X) %*%mod.X)
+    eigen.x$val # eigenvalues from the design matrix
+    sqrt(max(eigen.x$val)/min(eigen.x$val))
+}
+@
+
+\section{Background expected before reading this tutorial}
+
+Before you go through this tutorial, make sure you have already gone through the tutorials that introduce concepts such as (simple) linear regression, the general linear model, multi-colinearity, fitting polynomial terms and interaction terms. I am also not covering the idea of model selection in this tutorial, as this is discussed elsewhere. Not surprisingly I also expect that you are pretty comfortable with programming in \R\ including fitting linear models and some plotting.
+
+\section{Conceptual introduction for multiple linear regression}
+
+As we have seen before, we can express the simple linear regression (a special case of the general linear model) as follows:\\
+\\
+modelA -- $y \sim N(\beta_{mA,0} + \beta_{mA,1}x_1, \sigma_{mA}^2)$\\
+\\
+$y$ represents observed values for the response and $x_1$ is the observed value for the predictor variable. $\beta_{mA,0}$ is the intercept, and $\beta_{mA,1}$ is the estimated parameter value for the slope, sometimes called the regression coefficient relating $y$  to $x_1$.  We are adding in the subscripts \emph{mA} to denote which model it comes from (model A). This is because we are going to look at a lot of models. 
+
+We can also add additional observed predictor variables $x_2, x_3$ and fit the following \emph{multiple} regression model:\\
+\\
+modelB -- $y \sim N(\beta_0 + \beta_1x_1 + \beta_2x_2 + \beta_3x_3, \sigma_{mB}^2)$\\
+\\
+Where $\beta_1$, $\beta_2$ and $\beta_3$ represent the estimated \emph{partial} regression coefficients for $x_1, x_2, x_3$ respectively.\\ You will notice that we have already broken the tradition we set above by not using the subscript \emph{mB} for each parameter we are estimating. That is because modelB is our \emph{focal} model that we are interested in fitting in the next two sections. All other models (mA, M1, M2 \& M3) use subscripts. 
+\\
+Now the $\beta_1$ \& $\beta_{mA,1}$ coefficient(s) from these two models represent the same term, the slope of the relationship between $y$ and $x_1$. However you will notice that when you fit these two models the estimates of $\beta_1$ \& $\beta_{mA,1}$ from the two models are not the same (nor are their standard errors). This is very important question, and understanding the answer will really aid in understanding what multiple regression model does, and how to interpret these partial regression coefficients.
+
+\section{partial regression coefficients} 
+The reason for the the differences in the estimates of $\beta_1$ \& $\beta_{mA,1}$ is because in the second model, $y \sim N(\beta_0 + \beta_1x_1 + \beta_2x_2 + \beta_3x_3, \sigma^2)$\\ parameter estimates take into account all of the other covariates in the model. That is the model estimates account for any covariation between the different predictor variables $x_1, x_2, x_3$ and finds the best estimates for each parameter ($\beta_1$, $\beta_2$ and $\beta_3$) \emph{conditioned} upon the covariation among the observed values of the predictors.\\
+
+This is pretty similar to what we previously saw in terms of how the slope and intercept could co-vary in the simple linear regression. Even in this simple linear regression the best estimate has to balance the `best' estimate of the intercept, with the `best' estimate of the slope. This is true for multiple linear regression, there are just more parameters to consider.
+\\
+Another, somewhat more intuitive way of thinking about it is as follows:\\
+\\
+modelB -- $y \sim N(\beta_0 + \beta_1x_1 + \beta_2x_2 + \beta_3x_3, \sigma^2)$\\
+\\
+The coefficient $\beta_1x_1$ associated with $x_1$ estimated from model B will be the same as if we first fit these two models:\\
+\\
+model1 --   $y \sim N(\beta_{m1,0} + \beta_{m1,2}x_2 + \beta_{m1,3}x_3, \sigma_{m1}^2)$\\
+\\
+model2  --  $x1 \sim N(\beta_{m2,0} + \beta_{m2,2}x_2 + \beta_{m2,3}x_3, \sigma_{m2}^2)$\\ 
+Notice that the response variable is not $y$, but $x1$!
+\\
+We will then use the \emph{residuals} of the observed $y$ values from model1 (we will call these $y'$)  and the residuals for $x1$ from model2 ($x_1'$) to fit the following model:\\
+\\
+model3  -- $y' \sim N(\beta_{m3,0} + \beta_{m3,1}x_{1}', \sigma_{m3}^2))$\\
+\\
+Formally we can think of the modeling process (for model3) like this:\\
+\\
+model3  -- $ (y | x_1, x_2) \sim N(\beta_{m3,0} + \beta_{m3,1}(x_1 |x_2,x_3), \sigma_{m3}^2))$\\
+\\
+Where the model relationship between $y \sim x_1$ takes into account (co)variation from the other observed variables $x_2, x_3$. 
+
+\section{Some examples}
+
+This may seem abstract, and possibly even somewhat confusing so let's work with some data that will help us understand what is going on. We are going to start with simulated data to `test' our ideas  discussed above. We  start by simulating our  two `observed' predictor variables \texttt{x1} \& \texttt{x2} that we will choose to be positively correlated with one another (Pearson  correlation coefficient, $\rho=0.6$). For simplicity we will start with both predictor variables as being \emph{standardized} (centered and scaled by their standard deviations). Thus both $x_1$ and $x_2$ are $\sim N(\mu = 0, \sigma^2 =  1)$. The correlation matrix $\mathbf{R}_{x_1, x_2}$,  will be the same as the covariance matrix $\mathbf{S}_{x_1, x_2}$, in this case since $x_1$ and $x_2$ are standardized.\\
+\\
+\begin{center}
+$
+\mathbf{S}_{x_1, x_2} = \mathbf{R}_{x_1, x_2} =
+\begin{bmatrix}
+\sigma_{x_1}=1  &  \rho_{x_1,x_2}=0.6\\
+\rho_{x_2,x_1}=0.6  &  \sigma_{x_2}=1
+\end{bmatrix}
+$\\
+\end{center}
+\\
+\\
+We compute this using the \texttt{mvrnorm()} function in the \texttt{MASS} library. This is just like \texttt{rnorm()}, but generates multivariate (in this case bivariate) data given a vector of means \texttt{mu = c(0,0)} and $
+\mathbf{S}_{x_1, x_2} $.\\
+\\
+<<>>=
+sigma = matrix( c(1, 0.6, 0.6, 1), byrow=T, nrow=2, ncol=2)
+X <- mvrnorm(100, mu=c(0,0), Sigma=sigma)
+colnames(X) <- c("x1", "x2")
+X <- data.frame(X)
+@
+\\
+
+ We can see (below) that the correlation between $x_1$ \& $x_2$ are close to what we expect,  although not identical since these are random samples.The covariances (and variances) are a bit further off, again due to simple sampling.
+ 
+<<>>=
+cor(X)
+cov(X) 
+@
+\\
+We can also plot the relationship:\\
+\begin{center}
+<<echo=F, fig=T>>=
+plot(X, pch=16)
+@
+\end{center}
+
+Now we simulate some `observed' values for our response variable using the following model:\\
+\\
+$ y \sim N(\mu = 3 + 2x_1 + 2.5x_2, \sigma = 5 )$\\
+\\
+<<>>=
+y <- rnorm(100, 3 +2*X$x1 + 2.5*X$x2, 5)
+@
+\\
+We can plot the relationship between $y$ and our two predictors $x_1$ and $x_2$:\\
+\begin{center}
+<<fig=T, echo=F>>=
+par(mfrow=c(1,2))
+plot(y ~ X$x1, pch=16)
+plot( y ~ X$x2, pch=16)
+par(mfrow=c(1,1))
+@
+\end{center}
+\\
+We will now fit three different linear models. One with both $x_1$ and $x_2$ as predictor variables, one with only $x_1$ as a predictor and finally one with only $x_2$ as a predictor variable.
+
+<<>>=
+model_x1x2  <- lm(y ~ x1 + x2, data=X)
+model_x1     <- lm(y ~  x1, data=X)
+model_x2     <- lm(y ~ x2, data=X)
+@
+Let's take a look at the estimated parameter values from these models:\\
+<<>>=
+coef(model_x1x2)
+coef(model_x1)
+coef(model_x2)
+@
+
+These are clearly not identical coefficients associated with the same predictors. This is because, (as discussed above), the terms have been adjusted for the presence of the other variables in the model. We can show this for one of the models.
+<<>>=
+model_x1_adjusted  <- lm(x1~x2, data=X) 
+# accounts for x1|x2
+model_adjusted <- lm(model_x2$resid ~ model_x1_adjusted$resid)
+coef(model_adjusted)
+coef(model_x1x2)
+@
+\\
+You can now see that the estimated coefficient $\hat{\beta}_{x_1}$ is the same for the models. I will leave it as an exercise to demonstrate this for $x_2$. I also recommend that you take a look at what influence such adjustments make on the standard errors and confidence intervals for the estimates:\\
+<<>>=
+cbind(summary(model_x1x2)$coef[,1:2], confint(model_x1x2))
+@
+\\
+As compared to:\\
+<<>>=
+cbind(summary(model_x1)$coef[,1:2], confint(model_x1))
+cbind(summary(model_adjusted)$coef[,1:2], confint(model_adjusted))
+@
+\\
+I leave it as an \emph{important} exercise to see what happens when you set the covariances/correlations in the $\mathbf{S_{x_1,x_2}}$ matrix to $0$.  How do you think this will change the pattern for the estimated coefficients in the multiple regression model, as compared to the models with just the single predictors?
+
+\section{colinearity in the estimated parameters}
+Given that we are using simulated data for this activity, I do not want to spend too much time on model diagnostics etc..  However, I do want to remind you that since the predictors $x_1$ and $x_2$ are correlated, we expect this to cause correlations among the estimated predictors.
+\subsection{covariances among the estimated parameters ($\beta$s)}
+We can check the (co)variances among the predictors using \texttt{vcov()}. Remember that the square root of the diagonal elements will be the standard errors for each parameter. We can also use \texttt{cov2cor()} to convert the covariance matrix (of the parameter estimates) to a correlation matrix, helping us understand how the estimation of these parameters influences each other.
+<<>>=
+vcov(model_x1x2)
+cov2cor(vcov(model_x1x2))
+@
+\\
+So a reasonable amount of correlation, which is the negative value of the observed correlation between the simulated $x_1$ and $x_2$.\\
+<<>>=
+cor(X)[1,2]
+cov2cor(vcov(model_x1x2))[2,3]
+@
+\\
+We can also visualize this with a confidence ellipse
+\begin{center}
+<<fig=T, echo=F>>=
+par(mfrow=c(1,1))
+confidenceEllipse(model_x1x2, which.coef=c(2,3))
+@
+\end{center}
+
+\subsection{condition number, $\kappa$ as an estimate of multi-colinearity in the design matrix $\mathbf{X}$}
+Unlike what we did for the polynomials, or for the slope and intercept, centering the data \emph{will not help us to remove this `real' correlation}. So, is the correlation between $x_1$ and $x_2$ going to cause problems with our ability to estimate coefficients (and increase their standard errors)? We can check this using condition number, $\kappa$ which is included as a function in this tutorial \texttt{ConditionNumber} as well as variance inflation factor, which we can access from the \texttt{car} library as \texttt{vif()}.
+<<>>=
+ConditionNumber(model_x1x2)
+vif(model_x1x2)
+@
+
+If you remember our `rule of thumb' is that $\kappa < 30$ and vif $< 6$ suggest that the colinearity causes by the correlation between $x_1$ and $x_2$ is small enough that we do not need to worry too much.
+
+\section{What's next}
+Since this is a made up example, and the tutorial is long enough, we will stop here. The next tutorial, which will use some real phenotypic selection data will allow us to go further with various forms of plots (coefficient plots, effect plots, added-variable plots, contour plots and perspective plots), think about the the partial $R^2$ to help us account for variation in the response for each predictor adjusting for the influence of all other predictors, and a few more things. I will say at this point that the \texttt{car} library has a great deal of useful functionality with respect to linear models, most of which we will only touch upon. In particular check out \texttt{avPlots, leveragePlots, mmps, crPlots, residualsPlots, ceresPlots}. It is definitely worth wading though the functions in \texttt{car} to look at what these can do.
+\end{document}

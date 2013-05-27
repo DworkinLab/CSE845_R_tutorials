@@ -1,0 +1,357 @@
+\documentclass[a4paper]{article}
+\title{CSE845 - Thinking about all of the parameters we estimate in linear models} 
+\author{Ian Dworkin}
+\begin{document} 
+\maketitle
+\date
+
+<<echo=F>>=
+options(show.signif.stars=F)
+options(digits=4)
+@
+
+\section*{Introduction}
+Here is a little script that may help serve as a reminder where everything comes from in a regression from the point of view of LSE and sum of squares. 
+
+Let us start by generating some simulated predictor (x) and response (y) observations.
+
+<<>>=
+x <- 1:20 # Our "x" values.  
+
+beta_0 <- 2 # Our "real" intercept. It is real, because we decided it \textit{apriori}.
+
+beta_1 <- 2 # this is our "real" slope
+
+unexplained_sd <- 2 # This is the unaccounted for variation. 
+ # Compare it to the residual standard error for a regression model.
+@
+
+Now we can use all of this to generate our simulated response (y). Here we are generating our values based on a simple model (mean=), with some amount of unexplained variation (sd=), that comes from a particular probability distribution (normal in this case, rnorm)
+
+<<>>=
+y <- rnorm(x, mean= beta_0 + beta_1*x, sd=unexplained_sd) 
+@
+
+\section*{Method of moment estimators for variance, covariance and Pearson Correlation}
+
+\subsection*{Variance}
+We can make our own function for the variance (just as a reminder)
+
+<<>>=
+VarFunction <- function(x) {
+	S.S <- sum((x-mean(x))^2)  # Sum of Squares
+	variance <- (1/(length(x)-1))*S.S
+	return(variance)
+}
+
+VarFunction(y)
+@
+
+Or just use the pre-built function in \textbf{R}:
+
+<<>>=
+var(y)
+@
+
+\subsection*{Covariance}
+We can also think about the covariance, which is calculated the same way as the variance above, but for two random variables.
+
+<<>>=
+CovarianceFunction <- function(x,y) {
+	sum.cross.products <- sum( (x-mean(x)) * (y-mean(y)) )  # Sum of cross products
+	covariance <- (1/(length(x)-1))*sum.cross.products 
+	return(covariance)
+}
+
+CovarianceFunction(x,y) 
+@
+
+Again, we could use the built in function cov
+<<>>=
+cov(y,x)
+@
+
+For good measure we should remember that the covariance is an unscaled measure of the association between two variables, and can go from -\infty to +\infty.\\
+
+\subsection*{Correlation (Pearson)}
+The Pearson moment correlation coefficient (usually just called the correlation coefficient) is a scaled measure of association. The population parameter usually is symbolized by rho, $\rho$, while the sample estimate (what we are estimating) is just a lower case `r'.
+
+<<>>=
+CorrelationFunction <- function(x,y){
+	sum.cross.products <- sum( (x-mean(x)) * (y-mean(y)) )  # Sum of cross products
+	covariance <- (1/(length(x)-1))*sum.cross.products
+	correlation <- covariance/(sd(x)*sd(y)) # scaled by the products of the standard deviations for x and y
+	return(correlation)
+}
+
+CorrelationFunction(y,x)
+@
+
+Or using the built in function in \textbf{R}:
+
+<<>>=
+cor(y,x)
+@
+
+Thinking about what we have done, we have scaled the covariances by the standard deviation for each random variable. Can you think of other ways of scaling the covariance? Why might this matter?
+
+
+
+\section*{Plotting the data}
+
+Let us look at this graphically
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+plot(y~x, xlim=c(0, max(x)), ylim=c(0, max(y)) )
+abline(lm(y~x), lty=2) # The best fit regression line
+
+# add the mean of x and y as a point (red dot)
+points(mean(x), mean(y), pch=16, col="red", cex=2)
+
+# and some text to remind us of a very significant issue
+text(x = 15.5, y = 20, col="red",
+ expression(paste("The fitted regression line ", bold(y) == hat(beta)[0] + hat(beta)[1]))) 
+
+text(x = 15, y = 18, col="red",
+  expression(paste("must pass through " , "(",  bar(x), ", ", bar(y), ")")))
+@
+\end{center}  
+  
+\section*{The linear model}
+
+So let us know go and fit the linear model (a simple regression in this case). We us the \emph{lm()} in \textbf{R} to fit most standard linear models (simple and multiple regressions, ANOVA, ANCOVA for instance).
+
+<<>>=
+model.1 <- lm(y~x)
+@
+
+In \textbf{R}, this creates an object of class lm. We can look at a summary from the model by calling \emph{summary()} on the object we have created.
+
+<<>>=
+summary(model.1)
+@
+
+For now just focus on the estimates of the slope, and intercept. Let us take apart what all of the output in the summary means.
+
+\subsection*{Where do the coefficients come from}
+
+\subsubsection*{Slope}
+Below I show one approach (which is not actually the one \emph{lm()} uses) to calculate the Least Squares Estimate for the slope and intercept.\
+
+The LSE estimate for the slope is the covariance between y and x divided by variance in x. That is the covariance between the response and predictor scaled by the variance of the predictor. Those of you with some experience in algebra and geometry may recognize this as a projection.
+
+<<>>=
+slope <- cov(y,x)/var(x)
+slope
+@
+
+This is also equivalent to the Cross Product of x and y divided by the sum of squares of x.
+
+<<>>=
+cross.product.xy <- sum( (x - mean(x))*(y - mean(y))) 
+SS.x             <- sum( (x- mean(x))^2 ) 
+(slope.alt       <- cross.product.xy / SS.x )
+@
+
+\subsubsection*{Intercept}
+The least squared estimate for the Intercept can now be found
+<<>>=
+intercept <- mean(y) - slope*mean(x)
+intercept 
+@
+
+Let us add this to the plot
+
+\begin{center}
+<<fig=TRUE, echo=FALSE>>=
+plot(y~x, xlim=c(0, max(x)), ylim=c(0, max(y)) )
+abline(lm(y~x), lty=2) # The best fit regression line
+
+# add the mean of x and y as a point (red dot)
+points(mean(x), mean(y), pch=16, col="red", cex=2)
+
+abline(v=mean(x), lty=4, col="grey") # mean of x
+abline(h=mean(y), lty=4, col="grey") # mean of y
+
+points(x=0, y=intercept, col="blue", pch=16, cex=2)
+
+text(x = 4.25, y =1, col="blue",
+  expression(paste("The intercept ", hat(beta)[0], " when ",  x == 0)))
+
+# and some text to remind us of a very significant issue
+text(x = 15.5, y = 20, col="red",
+ expression(paste("The fitted regression line ", bold(y) == hat(beta)[0] + hat(beta)[1]))) 
+
+text(x = 15, y = 18, col="red",
+  expression(paste("must pass through " , "(",  bar(x), ", ", bar(y), ")")))
+@
+\end{center} 
+
+
+\subsection{Residual Standard error and degrees of freedom}
+The summary says there are 18 degrees of freedom. Where does this come from?\\
+
+Residual Standard error is just like the standard deviation of the residuals for the model, but instead of being divided by the number of observations -1 (df) it would be observations -2 (because we are estimating both a slope and intercept in this case).
+
+<<>>=
+mean(resid(model.1)) # ~ 0, explain why.
+
+RSE <- sqrt(sum(resid(model.1)^2)/(length(y) - 2))
+RSE
+@
+
+\subsection*{Coefficient of Determination, \(R^2\)}
+
+One important questions we want to generally address is how much of the variation in our response (y) is accounted for by our model. We generally use the coefficient of determination, also know as Rsquared, \(R^2\) for this. As we will see, for simple linear regression models, \(R^2\) really is just the squared quantity for the Pearson correlation coefficient, r. However the interpretation is \emph{quite different}. For more complex models (with more than a single predictor) this relationship does not hold.\\
+
+Along with the estimated coefficients/parameters, and the confidence intervals (or standard errors), the coefficient of determination is one of the most useful "numbers" we can get from the model output. It provides us with an estimate of how much of the variation in our response (y) we can explain with our predictor variables (one or more x variables).\
+
+<<>>=
+cor(y,x)^2
+# Compare to
+summary(model.1)$r.squared
+@
+This will not work for multiple regressions (where we have more than one covariate). \
+\
+More generally it is best thought as the sum of squares accounted for (by the model) over the total sum of squares. It is easiest to see this by looking at the anova table for the model
+
+<<>>=
+anova(model.1)
+model.SS <- anova(model.1)[1,2]
+total.SS <- anova(model.1)[1,2] + anova(model.1)[2,2]
+model.SS/total.SS
+@
+
+For people who find the concept of sums of squares a bit fuzzy, this may help. We are just summing up the squared differences between each observation of our response variable (the y's') and the mean of y.
+
+<<>>=
+total.SS.alt <- sum( (y - mean(y))^2 )  # The total amount of variation (measured in SS) for y!
+total.SS.alt
+@
+
+I find this very useful to think about, as it basically means that from the point of view of LSE, we are really thinking about how much total variation we have in "y" (our total.SS), and the model enables us to partition this into the component of variation we can account for by our model $ y = \hat{\beta_{0}} + \hat{\beta_{1}}x$, and the unaccounted for (residual) variation. This approach leads to some pretty useful ways of "testing" models. 
+
+\subsubsection*{Adjusted \(R^2\) }
+The adjusted R-squared addresses the same question, but in a slightly different way. Instead of using the sum of squares, it uses the unexplained residual variance in the model \(RSE^2\) to calculate the total variance explained  by the model, scaled by the total variance for our response variable, y.
+
+<<>>=
+variance.explained <- var(y) - RSE^2 # Total variance - unexplained variance.
+(R.adj <- variance.explained/var(y))
+@
+
+The important point to get (which may not be immediately obvious) is that the measure is \emph{adjusted} by accounting for the degrees of freedom (how many parameters have been fit). Only the adjusted \(R^2\) accounts for this. The Multiple \(R^2\) does not utilize this information.\\
+
+The practical and \emph{important} point here is that the adjusted \(R^2\) adjusts for MODEL COMPLEXITY, while the regular multiple \(R^2\) does not.
+
+
+It always helps to visualize these sorts of issues. One way of thinking about this is by asking the following question:\\
+
+" How well is my model really fitting the data?"
+\
+So one thing we can do is plotted the observed values for our response (y) against the fitted values for $\hat{y}$.
+
+
+\begin{center}
+<<fig=TRUE, echo=TRUE>>=
+plot(y ~ fitted(model.1), pch = 16, 
+  ylab  = expression(paste("observed values of response, ", bold(y))),
+  xlab  = expression(paste(" model fitted values of the response, ", hat(bold(y)))),
+  main  = expression(paste("fitted VS. observed values for the response, ", 
+  bold(y), " VS. ", hat(bold(y)))))
+
+# Now we can fit a  line of 1 to 1 correspondence
+abline(a = 0, b =1, col ="grey", lwd=2)  
+@
+\end{center}
+
+I FIND THIS TO BE ONE OF THE SINGLE MOST USEFUL PLOTS IN ALL OF STATISTICS. You can use it regardless of the number of predictor variables you have, and really give you a good sense of how useful your model really is.
+
+
+\section*{F statistics and the ANOVA table}
+The F statistic and the ANOVA table for a regression model (for all linear models really) can be obtained easily:\\
+<<>>=
+anova(model.1)
+@
+
+Here is a quick idea of where the F value comes from. For this simple model, it is simply the ratio of of the mean squares for the model, divided by the residual mean square. The mean squares are simply the SS we just looked at divided by the degrees of freedom we have for the model, and the residuals. We can think about what "mean squares" actually means.\\
+
+YOU WILL ALSO notice that the residual mean square is the same as the  \(RSE^2\). Same thing, different name.
+<<>>=
+RSE^2
+@
+
+\subsection*{Using sum of squares to compare models}
+
+Instead of thinking about an ANOVA table, and testing particular parameters, let us instead think about the problem as a comparison between the "fit" of two models. Our model.1, and the null model. For the null, we are not fitting a parameter associated with x (the slope), just the intercept, which will correspond to mean for y.
+
+<<>>=
+null.model <- lm( y ~ 1) 
+summary(null.model) # This fits only one parameter, the sample mean of y
+mean(y)
+
+anova(null.model) 
+@
+Since the only parameter we have fit is the mean, the residual SS for the null model is equivalent to our total.SS from above. Take a look above, to see for yourself.
+
+<<>>=
+null.model.SS <- anova(null.model)[1,2]
+total.SS
+@
+
+So one thing we can do is ask is " how much more variation can we account for using model.1 than null.model?". One simple approach to this is to compare SS from the two models.
+
+<<>>=
+(null.model.SS - model.SS) 
+@
+
+Which in this case is just the residual SS from model.1.\\
+
+Hopefully you can also see you can use an ANOVA framework to compare the models, using the residual sum of squares for each model (and calculating MS for each, and then the F ratio). We can do this automatically in \textbf{R}
+
+<<>>=
+anova(null.model, model.1)
+@
+
+Which is really just a restatement of the anova table for model.1
+<<>>=
+anova(model.1)
+@
+
+However it is far more general as it allows us to compare larger sets of models.\\
+
+Let us go back to the summary
+<<>>=
+summary(model.1)
+@
+
+Clearly there are a whole bunch of things here I have not yet explained yet in the summary from the linear model. 
+
+How do we get the standard Error (SE) for the intercept?\\
+
+I am not going to derive the SE equation from LSE here (we will talk a lot more about this using resampling, simulation, MLE and Bayesian).A  little calculus allows us to demonstrate that the SE of the slope can be found by comparing the squared residual error variation and dividing it by the sum of squares in our X values, then taking the sqrt of this value.
+
+<<>>=
+SE.slope <- sqrt(RSE^2/SS.x)
+SE.slope
+@
+
+The t value is essentially a t-test for the estimate of the slope against the "null" of no effect (0), so it is estimate divided by the SE of the estimate
+<<>>=
+slope/SE.slope
+@
+
+Which is then compared against a t-distribution.
+
+We will talk more about how we get these later.. But the most important information (the confidence intervals of course can be obtained using):
+
+<<>>=
+confint(model.1)
+@
+as well as the model coefficients
+<<>>=
+model.1$coef
+@
+
+
+\end{document}
